@@ -57,6 +57,9 @@ export default function Navbar() {
           <Link href="/search">
             <Button variant="ghost" size="sm">🔍</Button>
           </Link>
+          <Link href="/messages">
+            <Button variant="ghost" size="sm">💬</Button>
+          </Link>
           <Link href="/notifications">
             <Button variant="ghost" size="sm" className="relative">
               🔔
