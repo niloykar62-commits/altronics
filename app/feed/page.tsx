@@ -42,20 +42,15 @@ export default function Feed() {
         return;
       }
       setUser(firebaseUser);
-
       try {
         const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (profileDoc.exists()) {
-          setUserProfile(profileDoc.data());
-        }
+        if (profileDoc.exists()) setUserProfile(profileDoc.data());
         await loadPosts();
-      } catch (err: any) {
+      } catch (err) {
         console.error('Feed load error:', err);
       }
-
       setPageLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
@@ -69,7 +64,7 @@ export default function Feed() {
         likes: d.data().likes || [],
       }));
       setPosts(postList);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Load posts error:', err);
     }
   };
@@ -94,17 +89,40 @@ export default function Feed() {
     setLoading(false);
   };
 
+  const sendNotification = async (
+    toUserId: string,
+    type: string,
+    extra?: object
+  ) => {
+    if (toUserId === user.uid) return; // don't notify yourself
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        toUserId,
+        fromUserId: user.uid,
+        fromUsername: userProfile?.username || 'someone',
+        type,
+        read: false,
+        createdAt: serverTimestamp(),
+        ...extra,
+      });
+    } catch (err) {
+      console.error('Notification error:', err);
+    }
+  };
+
   const toggleLike = async (post: any) => {
     if (!user) return;
     const postRef = doc(db, 'posts', post.id);
     const alreadyLiked = post.likes?.includes(user.uid);
-
     try {
       await updateDoc(postRef, {
         likes: alreadyLiked ? arrayRemove(user.uid) : arrayUnion(user.uid),
       });
+      if (!alreadyLiked) {
+        await sendNotification(post.userId, 'like');
+      }
       await loadPosts();
-    } catch (err: any) {
+    } catch (err) {
       console.error('Like error:', err);
     }
   };
@@ -121,7 +139,7 @@ export default function Feed() {
         ...d.data(),
       }));
       setComments((prev) => ({ ...prev, [postId]: commentList }));
-    } catch (err: any) {
+    } catch (err) {
       console.error('Load comments error:', err);
     }
   };
@@ -129,33 +147,33 @@ export default function Feed() {
   const toggleComments = async (postId: string) => {
     const isShowing = showComments[postId];
     setShowComments((prev) => ({ ...prev, [postId]: !isShowing }));
-    if (!isShowing) {
-      await loadComments(postId);
-    }
+    if (!isShowing) await loadComments(postId);
   };
 
-  const addComment = async (postId: string) => {
-    const text = commentInputs[postId]?.trim();
+  const addComment = async (post: any) => {
+    const text = commentInputs[post.id]?.trim();
     if (!text || !user) return;
-
     try {
-      await addDoc(collection(db, 'posts', postId, 'comments'), {
+      await addDoc(collection(db, 'posts', post.id, 'comments'), {
         userId: user.uid,
         username: userProfile?.username || 'anonymous',
         fullName: userProfile?.fullName || user.displayName || 'User',
         content: text,
         createdAt: serverTimestamp(),
       });
-      setCommentInputs((prev) => ({ ...prev, [postId]: '' }));
-      await loadComments(postId);
-    } catch (err: any) {
+      await sendNotification(post.userId, 'comment', {
+        commentText: text.slice(0, 50),
+      });
+      setCommentInputs((prev) => ({ ...prev, [post.id]: '' }));
+      await loadComments(post.id);
+    } catch (err) {
       console.error('Comment error:', err);
     }
   };
 
   if (pageLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950">
         <p className="text-gray-500 text-sm">Loading feed...</p>
       </div>
     );
@@ -165,13 +183,12 @@ export default function Feed() {
     <>
       <Navbar />
       <div className="max-w-2xl mx-auto p-4 pt-6">
-
-        {/* Create Post Box */}
+        {/* Create Post */}
         <Card className="mb-8">
           <CardContent className="p-4">
             <p className="text-sm text-gray-500 mb-2">
               Posting as{' '}
-              <span className="font-medium text-black">
+              <span className="font-medium text-black dark:text-white">
                 @{userProfile?.username || 'you'}
               </span>
             </p>
@@ -201,24 +218,24 @@ export default function Feed() {
             posts.map((post) => {
               const liked = post.likes?.includes(user?.uid);
               const likeCount = post.likes?.length || 0;
-
               return (
                 <Card key={post.id}>
                   <CardContent className="p-5">
-
                     {/* Post Header */}
                     <div className="flex items-center gap-3 mb-3">
-                      <div className="w-9 h-9 rounded-full bg-gray-200 flex items-center justify-center font-bold text-gray-600 text-sm">
+                      <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-sm">
                         {post.fullName?.[0]?.toUpperCase() || 'U'}
                       </div>
                       <div>
-                        <p className="font-semibold text-sm">{post.fullName}</p>
+                        <p className="font-semibold text-sm dark:text-white">{post.fullName}</p>
                         <p className="text-xs text-gray-400">@{post.username}</p>
                       </div>
                     </div>
 
                     {/* Post Content */}
-                    <p className="text-gray-800 leading-relaxed">{post.content}</p>
+                    <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
+                      {post.content}
+                    </p>
                     <p className="text-xs text-gray-400 mt-2">
                       {post.createdAt?.toDate
                         ? new Date(post.createdAt.toDate()).toLocaleString()
@@ -226,16 +243,16 @@ export default function Feed() {
                     </p>
 
                     {/* Like & Comment Buttons */}
-                    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100">
+                    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100 dark:border-gray-800">
                       <button
                         onClick={() => toggleLike(post)}
                         className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${
                           liked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'
                         }`}
                       >
-                        {liked ? '❤️' : '🤍'} {likeCount} {likeCount === 1 ? 'Like' : 'Likes'}
+                        {liked ? '❤️' : '🤍'} {likeCount}{' '}
+                        {likeCount === 1 ? 'Like' : 'Likes'}
                       </button>
-
                       <button
                         onClick={() => toggleComments(post.id)}
                         className="flex items-center gap-1.5 text-sm font-medium text-gray-400 hover:text-blue-400 transition-colors"
@@ -247,26 +264,25 @@ export default function Feed() {
                     {/* Comments Section */}
                     {showComments[post.id] && (
                       <div className="mt-4 space-y-3">
-                        {/* Existing Comments */}
                         {(comments[post.id] || []).length === 0 ? (
                           <p className="text-xs text-gray-400">No comments yet.</p>
                         ) : (
                           (comments[post.id] || []).map((comment) => (
                             <div key={comment.id} className="flex gap-2">
-                              <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0">
+                              <div className="w-7 h-7 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0">
                                 {comment.fullName?.[0]?.toUpperCase() || 'U'}
                               </div>
-                              <div className="bg-gray-50 rounded-lg px-3 py-2 flex-1">
-                                <p className="text-xs font-semibold text-gray-700">
+                              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg px-3 py-2 flex-1">
+                                <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
                                   @{comment.username}
                                 </p>
-                                <p className="text-sm text-gray-700">{comment.content}</p>
+                                <p className="text-sm text-gray-700 dark:text-gray-300">
+                                  {comment.content}
+                                </p>
                               </div>
                             </div>
                           ))
                         )}
-
-                        {/* Add Comment Input */}
                         <div className="flex gap-2 mt-2">
                           <Input
                             placeholder="Write a comment..."
@@ -278,13 +294,13 @@ export default function Feed() {
                               }))
                             }
                             onKeyDown={(e) => {
-                              if (e.key === 'Enter') addComment(post.id);
+                              if (e.key === 'Enter') addComment(post);
                             }}
                             className="text-sm"
                           />
                           <Button
                             size="sm"
-                            onClick={() => addComment(post.id)}
+                            onClick={() => addComment(post)}
                             disabled={!commentInputs[post.id]?.trim()}
                           >
                             Send
@@ -292,7 +308,6 @@ export default function Feed() {
                         </div>
                       </div>
                     )}
-
                   </CardContent>
                 </Card>
               );

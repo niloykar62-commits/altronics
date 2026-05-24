@@ -2,13 +2,12 @@
 
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
-import { signOut } from 'firebase/auth';
-import { onAuthStateChanged } from 'firebase/auth';
+import { signOut, onAuthStateChanged } from 'firebase/auth';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import { useEffect, useState } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
 
 export default function Navbar() {
   const router = useRouter();
@@ -36,7 +35,7 @@ export default function Navbar() {
       const snapshot = await getDocs(q);
       setUnreadCount(snapshot.size);
     } catch (err) {
-      console.error(err);
+      console.error('Unread count error:', err);
     }
   };
 
