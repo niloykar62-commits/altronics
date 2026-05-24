@@ -23,9 +23,14 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 
+const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
 export default function Feed() {
   const [posts, setPosts] = useState<any[]>([]);
   const [content, setContent] = useState('');
+  const [image, setImage] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -69,19 +74,54 @@ export default function Feed() {
     }
   };
 
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image must be under 5MB');
+      return;
+    }
+    setImage(file);
+    setImagePreview(URL.createObjectURL(file));
+  };
+
+  const uploadToCloudinary = async (file: File): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('upload_preset', UPLOAD_PRESET!);
+
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+      { method: 'POST', body: formData }
+    );
+    const data = await res.json();
+    return data.secure_url;
+  };
+
   const createPost = async () => {
-    if (!content.trim() || !user) return;
+    if (!content.trim() && !image) return;
+    if (!user) return;
     setLoading(true);
+
     try {
+      let imageUrl = null;
+      if (image) {
+        imageUrl = await uploadToCloudinary(image);
+      }
+
       await addDoc(collection(db, 'posts'), {
         userId: user.uid,
         username: userProfile?.username || 'anonymous',
         fullName: userProfile?.fullName || user.displayName || 'User',
         content: content.trim(),
+        imageUrl,
         createdAt: serverTimestamp(),
         likes: [],
       });
+
       setContent('');
+      setImage(null);
+      setImagePreview(null);
       await loadPosts();
     } catch (err: any) {
       alert('Failed to post: ' + err.message);
@@ -89,12 +129,8 @@ export default function Feed() {
     setLoading(false);
   };
 
-  const sendNotification = async (
-    toUserId: string,
-    type: string,
-    extra?: object
-  ) => {
-    if (toUserId === user.uid) return; // don't notify yourself
+  const sendNotification = async (toUserId: string, type: string, extra?: object) => {
+    if (toUserId === user.uid) return;
     try {
       await addDoc(collection(db, 'notifications'), {
         toUserId,
@@ -118,9 +154,7 @@ export default function Feed() {
       await updateDoc(postRef, {
         likes: alreadyLiked ? arrayRemove(user.uid) : arrayUnion(user.uid),
       });
-      if (!alreadyLiked) {
-        await sendNotification(post.userId, 'like');
-      }
+      if (!alreadyLiked) await sendNotification(post.userId, 'like');
       await loadPosts();
     } catch (err) {
       console.error('Like error:', err);
@@ -134,11 +168,10 @@ export default function Feed() {
         orderBy('createdAt', 'asc')
       );
       const snapshot = await getDocs(q);
-      const commentList = snapshot.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
+      setComments((prev) => ({
+        ...prev,
+        [postId]: snapshot.docs.map((d) => ({ id: d.id, ...d.data() })),
       }));
-      setComments((prev) => ({ ...prev, [postId]: commentList }));
     } catch (err) {
       console.error('Load comments error:', err);
     }
@@ -161,9 +194,7 @@ export default function Feed() {
         content: text,
         createdAt: serverTimestamp(),
       });
-      await sendNotification(post.userId, 'comment', {
-        commentText: text.slice(0, 50),
-      });
+      await sendNotification(post.userId, 'comment', { commentText: text.slice(0, 50) });
       setCommentInputs((prev) => ({ ...prev, [post.id]: '' }));
       await loadComments(post.id);
     } catch (err) {
@@ -183,6 +214,7 @@ export default function Feed() {
     <>
       <Navbar />
       <div className="max-w-2xl mx-auto p-4 pt-6">
+
         {/* Create Post */}
         <Card className="mb-8">
           <CardContent className="p-4">
@@ -198,9 +230,38 @@ export default function Feed() {
               onChange={(e) => setContent(e.target.value)}
               rows={3}
             />
+
+            {imagePreview && (
+              <div className="relative mt-3">
+                <img
+                  src={imagePreview}
+                  alt="Preview"
+                  className="w-full rounded-lg max-h-64 object-cover"
+                />
+                <button
+                  onClick={() => { setImage(null); setImagePreview(null); }}
+                  className="absolute top-2 right-2 bg-black bg-opacity-50 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 mt-3">
+              <label className="cursor-pointer flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+                📷 Photo
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleImageChange}
+                />
+              </label>
+            </div>
+
             <Button
               onClick={createPost}
-              disabled={loading || !content.trim()}
+              disabled={loading || (!content.trim() && !image)}
               className="mt-3 w-full"
             >
               {loading ? 'Posting...' : 'Post'}
@@ -221,7 +282,6 @@ export default function Feed() {
               return (
                 <Card key={post.id}>
                   <CardContent className="p-5">
-                    {/* Post Header */}
                     <div className="flex items-center gap-3 mb-3">
                       <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-sm">
                         {post.fullName?.[0]?.toUpperCase() || 'U'}
@@ -232,17 +292,26 @@ export default function Feed() {
                       </div>
                     </div>
 
-                    {/* Post Content */}
-                    <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
-                      {post.content}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-2">
+                    {post.content && (
+                      <p className="text-gray-800 dark:text-gray-200 leading-relaxed mb-3">
+                        {post.content}
+                      </p>
+                    )}
+
+                    {post.imageUrl && (
+                      <img
+                        src={post.imageUrl}
+                        alt="Post"
+                        className="w-full rounded-lg max-h-96 object-cover mb-3"
+                      />
+                    )}
+
+                    <p className="text-xs text-gray-400">
                       {post.createdAt?.toDate
                         ? new Date(post.createdAt.toDate()).toLocaleString()
                         : 'Just now'}
                     </p>
 
-                    {/* Like & Comment Buttons */}
                     <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100 dark:border-gray-800">
                       <button
                         onClick={() => toggleLike(post)}
@@ -261,7 +330,6 @@ export default function Feed() {
                       </button>
                     </div>
 
-                    {/* Comments Section */}
                     {showComments[post.id] && (
                       <div className="mt-4 space-y-3">
                         {(comments[post.id] || []).length === 0 ? (
