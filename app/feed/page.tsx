@@ -16,6 +16,7 @@ import {
   updateDoc,
   arrayUnion,
   arrayRemove,
+  deleteDoc,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,8 @@ export default function Feed() {
   const [commentInputs, setCommentInputs] = useState<{ [key: string]: string }>({});
   const [showComments, setShowComments] = useState<{ [key: string]: boolean }>({});
   const [comments, setComments] = useState<{ [key: string]: any[] }>({});
+  const [editingPost, setEditingPost] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
   const router = useRouter();
 
   useEffect(() => {
@@ -77,10 +80,7 @@ export default function Feed() {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image must be under 5MB');
-      return;
-    }
+    if (file.size > 5 * 1024 * 1024) { alert('Image must be under 5MB'); return; }
     setImage(file);
     setImagePreview(URL.createObjectURL(file));
   };
@@ -89,7 +89,6 @@ export default function Feed() {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', UPLOAD_PRESET!);
-
     const res = await fetch(
       `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
       { method: 'POST', body: formData }
@@ -102,13 +101,9 @@ export default function Feed() {
     if (!content.trim() && !image) return;
     if (!user) return;
     setLoading(true);
-
     try {
       let imageUrl = null;
-      if (image) {
-        imageUrl = await uploadToCloudinary(image);
-      }
-
+      if (image) imageUrl = await uploadToCloudinary(image);
       await addDoc(collection(db, 'posts'), {
         userId: user.uid,
         username: userProfile?.username || 'anonymous',
@@ -118,7 +113,6 @@ export default function Feed() {
         createdAt: serverTimestamp(),
         likes: [],
       });
-
       setContent('');
       setImage(null);
       setImagePreview(null);
@@ -127,6 +121,36 @@ export default function Feed() {
       alert('Failed to post: ' + err.message);
     }
     setLoading(false);
+  };
+
+  const deletePost = async (postId: string) => {
+    if (!confirm('Delete this post?')) return;
+    try {
+      await deleteDoc(doc(db, 'posts', postId));
+      await loadPosts();
+    } catch (err) {
+      console.error('Delete error:', err);
+    }
+  };
+
+  const startEdit = (post: any) => {
+    setEditingPost(post.id);
+    setEditContent(post.content);
+  };
+
+  const saveEdit = async (postId: string) => {
+    if (!editContent.trim()) return;
+    try {
+      await updateDoc(doc(db, 'posts', postId), {
+        content: editContent.trim(),
+        edited: true,
+      });
+      setEditingPost(null);
+      setEditContent('');
+      await loadPosts();
+    } catch (err) {
+      console.error('Edit error:', err);
+    }
   };
 
   const sendNotification = async (toUserId: string, type: string, extra?: object) => {
@@ -230,35 +254,21 @@ export default function Feed() {
               onChange={(e) => setContent(e.target.value)}
               rows={3}
             />
-
             {imagePreview && (
               <div className="relative mt-3">
-                <img
-                  src={imagePreview}
-                  alt="Preview"
-                  className="w-full rounded-lg max-h-64 object-cover"
-                />
+                <img src={imagePreview} alt="Preview" className="w-full rounded-lg max-h-64 object-cover" />
                 <button
                   onClick={() => { setImage(null); setImagePreview(null); }}
                   className="absolute top-2 right-2 bg-black bg-opacity-50 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
-                >
-                  ✕
-                </button>
+                >✕</button>
               </div>
             )}
-
             <div className="flex items-center gap-3 mt-3">
-              <label className="cursor-pointer flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+              <label className="cursor-pointer text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
                 📷 Photo
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleImageChange}
-                />
+                <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
               </label>
             </div>
-
             <Button
               onClick={createPost}
               disabled={loading || (!content.trim() && !image)}
@@ -272,38 +282,83 @@ export default function Feed() {
         {/* Posts List */}
         <div className="space-y-4">
           {posts.length === 0 ? (
-            <p className="text-center text-gray-500 py-12">
-              No posts yet. Be the first to post!
-            </p>
+            <p className="text-center text-gray-500 py-12">No posts yet. Be the first to post!</p>
           ) : (
             posts.map((post) => {
               const liked = post.likes?.includes(user?.uid);
               const likeCount = post.likes?.length || 0;
+              const isOwner = post.userId === user?.uid;
+
               return (
                 <Card key={post.id}>
                   <CardContent className="p-5">
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-sm">
-                        {post.fullName?.[0]?.toUpperCase() || 'U'}
+
+                    {/* Post Header */}
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-sm">
+                          {post.fullName?.[0]?.toUpperCase() || 'U'}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm dark:text-white">{post.fullName}</p>
+                          <p className="text-xs text-gray-400">
+                            @{post.username} {post.edited && '· edited'}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold text-sm dark:text-white">{post.fullName}</p>
-                        <p className="text-xs text-gray-400">@{post.username}</p>
-                      </div>
+
+                      {/* Owner Actions */}
+                      {isOwner && (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => startEdit(post)}
+                            className="text-xs text-gray-400 hover:text-blue-500 px-2 py-1 rounded transition-colors"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => deletePost(post.id)}
+                            className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded transition-colors"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      )}
                     </div>
 
-                    {post.content && (
-                      <p className="text-gray-800 dark:text-gray-200 leading-relaxed mb-3">
-                        {post.content}
-                      </p>
-                    )}
-
-                    {post.imageUrl && (
-                      <img
-                        src={post.imageUrl}
-                        alt="Post"
-                        className="w-full rounded-lg max-h-96 object-cover mb-3"
-                      />
+                    {/* Edit Mode */}
+                    {editingPost === post.id ? (
+                      <div className="mb-3">
+                        <Textarea
+                          value={editContent}
+                          onChange={(e) => setEditContent(e.target.value)}
+                          rows={3}
+                          className="mb-2"
+                        />
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => saveEdit(post.id)}>
+                            Save
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setEditingPost(null)}>
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {post.content && (
+                          <p className="text-gray-800 dark:text-gray-200 leading-relaxed mb-3">
+                            {post.content}
+                          </p>
+                        )}
+                        {post.imageUrl && (
+                          <img
+                            src={post.imageUrl}
+                            alt="Post"
+                            className="w-full rounded-lg max-h-96 object-cover mb-3"
+                          />
+                        )}
+                      </>
                     )}
 
                     <p className="text-xs text-gray-400">
@@ -312,6 +367,7 @@ export default function Feed() {
                         : 'Just now'}
                     </p>
 
+                    {/* Like & Comment */}
                     <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100 dark:border-gray-800">
                       <button
                         onClick={() => toggleLike(post)}
@@ -319,8 +375,7 @@ export default function Feed() {
                           liked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'
                         }`}
                       >
-                        {liked ? '❤️' : '🤍'} {likeCount}{' '}
-                        {likeCount === 1 ? 'Like' : 'Likes'}
+                        {liked ? '❤️' : '🤍'} {likeCount} {likeCount === 1 ? 'Like' : 'Likes'}
                       </button>
                       <button
                         onClick={() => toggleComments(post.id)}
@@ -330,6 +385,7 @@ export default function Feed() {
                       </button>
                     </div>
 
+                    {/* Comments */}
                     {showComments[post.id] && (
                       <div className="mt-4 space-y-3">
                         {(comments[post.id] || []).length === 0 ? (
@@ -356,14 +412,9 @@ export default function Feed() {
                             placeholder="Write a comment..."
                             value={commentInputs[post.id] || ''}
                             onChange={(e) =>
-                              setCommentInputs((prev) => ({
-                                ...prev,
-                                [post.id]: e.target.value,
-                              }))
+                              setCommentInputs((prev) => ({ ...prev, [post.id]: e.target.value }))
                             }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') addComment(post);
-                            }}
+                            onKeyDown={(e) => { if (e.key === 'Enter') addComment(post); }}
                             className="text-sm"
                           />
                           <Button
