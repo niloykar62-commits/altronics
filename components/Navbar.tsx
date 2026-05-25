@@ -18,25 +18,17 @@ export default function Navbar() {
   useEffect(() => {
     setMounted(true);
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        await loadUnreadCount(firebaseUser.uid);
-      }
+      if (firebaseUser) await loadUnreadCount(firebaseUser.uid);
     });
     return () => unsubscribe();
   }, []);
 
   const loadUnreadCount = async (uid: string) => {
     try {
-      const q = query(
-        collection(db, 'notifications'),
-        where('toUserId', '==', uid),
-        where('read', '==', false)
-      );
+      const q = query(collection(db, 'notifications'), where('toUserId', '==', uid), where('read', '==', false));
       const snapshot = await getDocs(q);
       setUnreadCount(snapshot.size);
-    } catch (err) {
-      console.error('Unread count error:', err);
-    }
+    } catch (err) { console.error('Unread count error:', err); }
   };
 
   const handleLogout = async () => {
@@ -51,15 +43,10 @@ export default function Navbar() {
           ALTRONICS
         </Link>
         <div className="flex items-center gap-1">
-          <Link href="/feed">
-            <Button variant="ghost" size="sm">🏠</Button>
-          </Link>
-          <Link href="/search">
-            <Button variant="ghost" size="sm">🔍</Button>
-          </Link>
-          <Link href="/messages">
-            <Button variant="ghost" size="sm">💬</Button>
-          </Link>
+          <Link href="/feed"><Button variant="ghost" size="sm">🏠</Button></Link>
+          <Link href="/search"><Button variant="ghost" size="sm">🔍</Button></Link>
+          <Link href="/messages"><Button variant="ghost" size="sm">💬</Button></Link>
+          <Link href="/bookmarks"><Button variant="ghost" size="sm">🔖</Button></Link>
           <Link href="/notifications">
             <Button variant="ghost" size="sm" className="relative">
               🔔
@@ -70,21 +57,13 @@ export default function Navbar() {
               )}
             </Button>
           </Link>
-          <Link href="/profile">
-            <Button variant="ghost" size="sm">👤</Button>
-          </Link>
+          <Link href="/profile"><Button variant="ghost" size="sm">👤</Button></Link>
           {mounted && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            >
+            <Button variant="ghost" size="sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
               {theme === 'dark' ? '☀️' : '🌙'}
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handleLogout}>
-            Log out
-          </Button>
+          <Button variant="outline" size="sm" onClick={handleLogout}>Log out</Button>
         </div>
       </div>
     </nav>
