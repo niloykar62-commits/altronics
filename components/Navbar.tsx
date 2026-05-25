@@ -1,21 +1,18 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import Link from 'next/link';
-import { useTheme } from 'next-themes';
 import { useEffect, useState } from 'react';
 
 export default function Navbar() {
   const router = useRouter();
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const pathname = usePathname();
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    setMounted(true);
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) await loadUnreadCount(firebaseUser.uid);
     });
@@ -27,7 +24,7 @@ export default function Navbar() {
       const q = query(collection(db, 'notifications'), where('toUserId', '==', uid), where('read', '==', false));
       const snapshot = await getDocs(q);
       setUnreadCount(snapshot.size);
-    } catch (err) { console.error('Unread count error:', err); }
+    } catch (err) { console.error(err); }
   };
 
   const handleLogout = async () => {
@@ -39,89 +36,60 @@ export default function Navbar() {
     { href: '/feed', icon: '🏠', label: 'Home' },
     { href: '/search', icon: '🔍', label: 'Search' },
     { href: '/messages', icon: '💬', label: 'Messages' },
-    { href: '/bookmarks', icon: '🔖', label: 'Bookmarks' },
     { href: '/notifications', icon: '🔔', label: 'Notifications', badge: unreadCount },
     { href: '/profile', icon: '👤', label: 'Profile' },
   ];
 
   return (
     <>
-      {/* Desktop Sidebar */}
-      <nav className="hidden md:flex fixed left-0 top-0 h-full w-64 flex-col px-4 py-6 border-r border-[var(--border)] bg-[var(--background)] z-50">
-        <Link href="/feed" className="text-2xl font-black mb-8 px-3 text-[var(--accent)]">
-          ALTRONICS
-        </Link>
-
-        <div className="flex flex-col gap-1 flex-1">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center gap-4 px-3 py-3 rounded-full hover:bg-[var(--card-hover)] transition-colors group"
-            >
-              <span className="text-xl relative">
-                {item.icon}
-                {item.badge && item.badge > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-[var(--accent)] text-white text-xs w-4 h-4 rounded-full flex items-center justify-center">
-                    {item.badge}
-                  </span>
-                )}
-              </span>
-              <span className="text-[var(--foreground)] font-medium text-lg group-hover:text-[var(--accent)] transition-colors">
-                {item.label}
-              </span>
-            </Link>
-          ))}
-
-          {mounted && (
-            <button
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-              className="flex items-center gap-4 px-3 py-3 rounded-full hover:bg-[var(--card-hover)] transition-colors group"
-            >
-              <span className="text-xl">{theme === 'dark' ? '☀️' : '🌙'}</span>
-              <span className="text-[var(--foreground)] font-medium text-lg">
-                {theme === 'dark' ? 'Light' : 'Dark'}
-              </span>
-            </button>
-          )}
+      {/* Top Header */}
+      <header style={{
+        position: 'sticky', top: 0, zIndex: 50,
+        background: 'rgba(10,10,15,0.85)',
+        backdropFilter: 'blur(20px)',
+        borderBottom: '0.5px solid rgba(139,92,246,0.15)',
+      }}>
+        <div style={{ maxWidth: 600, margin: '0 auto', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 22, fontWeight: 900, letterSpacing: -1, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            ALTRONICS
+          </span>
+          <button
+            onClick={handleLogout}
+            style={{ padding: '6px 16px', borderRadius: 20, background: 'rgba(239,68,68,0.1)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+          >
+            Log out
+          </button>
         </div>
+      </header>
 
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-4 px-3 py-3 rounded-full hover:bg-red-50 dark:hover:bg-red-950 transition-colors group mt-4"
-        >
-          <span className="text-xl">🚪</span>
-          <span className="text-red-500 font-medium text-lg">Log out</span>
-        </button>
+      {/* Bottom Navigation */}
+      <nav style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50,
+        background: 'rgba(10,10,15,0.95)',
+        backdropFilter: 'blur(20px)',
+        borderTop: '0.5px solid rgba(139,92,246,0.15)',
+        padding: '10px 0 20px',
+      }}>
+        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+          {navItems.map(({ href, icon, label, badge }) => {
+            const isActive = pathname === href;
+            return (
+              <Link key={href} href={href} style={{ textDecoration: 'none' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '6px 16px', borderRadius: 16, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent', transition: 'all 0.2s', position: 'relative', cursor: 'pointer' }}>
+                  <span style={{ fontSize: 22 }}>{icon}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: isActive ? '#a78bfa' : '#6b7280' }}>{label}</span>
+                  {badge && badge > 0 && (
+                    <span style={{ position: 'absolute', top: 2, right: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', color: 'white', fontSize: 9, fontWeight: 700, width: 16, height: 16, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {badge > 9 ? '9+' : badge}
+                    </span>
+                  )}
+                  {isActive && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#a78bfa' }} />}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
       </nav>
-
-      {/* Mobile Top Bar */}
-      <div className="md:hidden fixed top-0 left-0 right-0 z-50 bg-[var(--background)] border-b border-[var(--border)] px-4 py-3 flex items-center justify-between">
-        <span className="text-lg font-black text-[var(--accent)]">ALTRONICS</span>
-        <div className="flex items-center gap-2">
-          {mounted && (
-            <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="p-2 rounded-full hover:bg-[var(--card-hover)]">
-              {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Mobile Bottom Nav */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[var(--background)] border-t border-[var(--border)] flex items-center justify-around px-2 py-2">
-        {navItems.map((item) => (
-          <Link key={item.href} href={item.href} className="flex flex-col items-center gap-0.5 p-2 rounded-full hover:bg-[var(--card-hover)] relative">
-            <span className="text-xl">
-              {item.icon}
-              {item.badge && item.badge > 0 && (
-                <span className="absolute top-1 right-1 bg-[var(--accent)] text-white text-xs w-3.5 h-3.5 rounded-full flex items-center justify-center">
-                  {item.badge}
-                </span>
-              )}
-            </span>
-          </Link>
-        ))}
-      </div>
     </>
   );
 }

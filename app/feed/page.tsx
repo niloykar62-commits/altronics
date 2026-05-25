@@ -4,19 +4,13 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import {
-  collection, addDoc, getDocs, orderBy, query,
-  serverTimestamp, doc, getDoc, updateDoc,
-  arrayUnion, arrayRemove, deleteDoc,
-} from 'firebase/firestore';
+import { collection, addDoc, getDocs, orderBy, query, serverTimestamp, doc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
-import { Heart, MessageCircle, Repeat2, Bookmark, Trash2, Pencil, Image } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
 const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
+
+const inputStyle = { width: '100%', padding: '12px 16px', background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)', borderRadius: 12, color: '#f3f4f6', fontSize: 14, fontFamily: 'Inter,sans-serif', outline: 'none' };
 
 export default function Feed() {
   const [posts, setPosts] = useState<any[]>([]);
@@ -33,6 +27,7 @@ export default function Feed() {
   const [editingPost, setEditingPost] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [repostingId, setRepostingId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('foryou');
   const router = useRouter();
 
   useEffect(() => {
@@ -61,8 +56,7 @@ export default function Feed() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { alert('Image must be under 5MB'); return; }
-    setImage(file);
-    setImagePreview(URL.createObjectURL(file));
+    setImage(file); setImagePreview(URL.createObjectURL(file));
   };
 
   const uploadToCloudinary = async (file: File): Promise<string> => {
@@ -82,12 +76,9 @@ export default function Feed() {
       let imageUrl = null;
       if (image) imageUrl = await uploadToCloudinary(image);
       await addDoc(collection(db, 'posts'), {
-        userId: user.uid,
-        username: userProfile?.username || 'anonymous',
-        fullName: userProfile?.fullName || user.displayName || 'User',
-        content: content.trim(), imageUrl,
-        createdAt: serverTimestamp(),
-        likes: [], reposts: [],
+        userId: user.uid, username: userProfile?.username || 'anonymous',
+        fullName: userProfile?.fullName || 'User', content: content.trim(),
+        imageUrl, createdAt: serverTimestamp(), likes: [], reposts: [],
       });
       setContent(''); setImage(null); setImagePreview(null);
       await loadPosts();
@@ -112,11 +103,7 @@ export default function Feed() {
   const sendNotification = async (toUserId: string, type: string, extra?: object) => {
     if (toUserId === user.uid) return;
     try {
-      await addDoc(collection(db, 'notifications'), {
-        toUserId, fromUserId: user.uid,
-        fromUsername: userProfile?.username || 'someone',
-        type, read: false, createdAt: serverTimestamp(), ...extra,
-      });
+      await addDoc(collection(db, 'notifications'), { toUserId, fromUserId: user.uid, fromUsername: userProfile?.username || 'someone', type, read: false, createdAt: serverTimestamp(), ...extra });
     } catch (err) { console.error(err); }
   };
 
@@ -133,33 +120,17 @@ export default function Feed() {
   const toggleBookmark = async (postId: string) => {
     if (!user) return;
     const isBookmarked = userProfile?.bookmarks?.includes(postId);
-    setUserProfile((prev: any) => ({
-      ...prev,
-      bookmarks: isBookmarked
-        ? (prev.bookmarks || []).filter((id: string) => id !== postId)
-        : [...(prev.bookmarks || []), postId],
-    }));
-    try {
-      await updateDoc(doc(db, 'users', user.uid), { bookmarks: isBookmarked ? arrayRemove(postId) : arrayUnion(postId) });
-    } catch (err) {
-      const profileDoc = await getDoc(doc(db, 'users', user.uid));
-      if (profileDoc.exists()) setUserProfile(profileDoc.data());
-    }
+    setUserProfile((prev: any) => ({ ...prev, bookmarks: isBookmarked ? (prev.bookmarks || []).filter((id: string) => id !== postId) : [...(prev.bookmarks || []), postId] }));
+    try { await updateDoc(doc(db, 'users', user.uid), { bookmarks: isBookmarked ? arrayRemove(postId) : arrayUnion(postId) }); }
+    catch (err) { const pd = await getDoc(doc(db, 'users', user.uid)); if (pd.exists()) setUserProfile(pd.data()); }
   };
 
   const repost = async (post: any) => {
-    if (!user) return;
-    if (post.reposts?.includes(user.uid)) { alert('Already reposted!'); return; }
+    if (!user || post.reposts?.includes(user.uid)) { alert('Already reposted!'); return; }
     if (!confirm(`Repost @${post.username}'s post?`)) return;
     setRepostingId(post.id);
     try {
-      await addDoc(collection(db, 'posts'), {
-        userId: user.uid, username: userProfile?.username || 'anonymous',
-        fullName: userProfile?.fullName || 'User',
-        content: post.content, imageUrl: post.imageUrl || null,
-        createdAt: serverTimestamp(), likes: [], reposts: [],
-        isRepost: true, originalAuthor: post.fullName, originalUsername: post.username,
-      });
+      await addDoc(collection(db, 'posts'), { userId: user.uid, username: userProfile?.username || 'anonymous', fullName: userProfile?.fullName || 'User', content: post.content, imageUrl: post.imageUrl || null, createdAt: serverTimestamp(), likes: [], reposts: [], isRepost: true, originalAuthor: post.fullName, originalUsername: post.username });
       await updateDoc(doc(db, 'posts', post.id), { reposts: arrayUnion(user.uid) });
       await sendNotification(post.userId, 'repost');
       await loadPosts();
@@ -185,63 +156,76 @@ export default function Feed() {
     const text = commentInputs[post.id]?.trim();
     if (!text || !user) return;
     try {
-      await addDoc(collection(db, 'posts', post.id, 'comments'), {
-        userId: user.uid, username: userProfile?.username || 'anonymous',
-        fullName: userProfile?.fullName || 'User',
-        content: text, createdAt: serverTimestamp(),
-      });
+      await addDoc(collection(db, 'posts', post.id, 'comments'), { userId: user.uid, username: userProfile?.username || 'anonymous', fullName: userProfile?.fullName || 'User', content: text, createdAt: serverTimestamp() });
       await sendNotification(post.userId, 'comment', { commentText: text.slice(0, 50) });
       setCommentInputs((prev) => ({ ...prev, [post.id]: '' }));
       await loadComments(post.id);
     } catch (err) { console.error(err); }
   };
 
-  if (pageLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--background)' }}>
-        <div className="text-[var(--accent)] font-bold text-xl animate-pulse">ALTRONICS</div>
-      </div>
-    );
-  }
+  if (pageLoading) return (
+    <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
+      <span style={{ fontSize: 40 }}>⚡</span>
+      <p style={{ color: '#a78bfa', fontWeight: 700, fontSize: 18, letterSpacing: 2 }}>ALTRONICS</p>
+    </div>
+  );
 
   return (
-    <div style={{ background: 'var(--background)', minHeight: '100vh' }}>
+    <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
       <Navbar />
-      <div className="max-w-xl mx-auto">
+      <div style={{ maxWidth: 600, margin: '0 auto', paddingBottom: 100 }}>
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', background: 'rgba(255,255,255,0.02)', borderBottom: '0.5px solid rgba(139,92,246,0.15)', padding: '0 20px' }}>
+          {['foryou', 'following', 'trending'].map((tab) => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              style={{ flex: 1, padding: '14px 0', background: 'none', border: 'none', color: activeTab === tab ? '#a78bfa' : '#6b7280', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderBottom: activeTab === tab ? '2px solid #8b5cf6' : '2px solid transparent', textTransform: 'capitalize', fontFamily: 'Inter,sans-serif', transition: 'all 0.2s' }}>
+              {tab === 'foryou' ? 'For You' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {/* Stories Row */}
+        <div style={{ display: 'flex', gap: 16, padding: '16px 20px', overflowX: 'auto', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+          {[{ emoji: '➕', name: 'Your Story', add: true }, { emoji: '🎮', name: 'alex_x' }, { emoji: '🎨', name: 'nova' }, { emoji: '🚀', name: 'kai.dev' }, { emoji: '🌙', name: 'luna' }].map((s, i) => (
+            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, cursor: 'pointer' }}>
+              <div style={{ width: 56, height: 56, borderRadius: '50%', padding: 2, background: s.add ? 'rgba(139,92,246,0.2)' : 'linear-gradient(135deg,#8b5cf6,#3b82f6)' }}>
+                <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0d0d14', border: '2px solid #0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
+                  {s.emoji}
+                </div>
+              </div>
+              <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 500 }}>{s.name}</span>
+            </div>
+          ))}
+        </div>
 
         {/* Create Post */}
-        <div className="border-b border-[var(--border)] p-4">
-          <div className="flex gap-3">
-            <div className="w-10 h-10 rounded-full bg-[var(--accent)] flex items-center justify-center font-bold text-white text-sm shrink-0">
+        <div style={{ padding: '16px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.4),rgba(59,130,246,0.4))', border: '1px solid rgba(139,92,246,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, color: '#a78bfa', flexShrink: 0 }}>
               {userProfile?.fullName?.[0]?.toUpperCase() || 'U'}
             </div>
-            <div className="flex-1">
-              <Textarea
+            <div style={{ flex: 1 }}>
+              <textarea
                 placeholder="What's happening?"
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                className="border-none bg-transparent text-lg placeholder:text-[var(--muted)] resize-none focus-visible:ring-0 p-0 min-h-[80px]"
-                style={{ color: 'var(--foreground)' }}
+                style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', color: '#f3f4f6', fontSize: 16, fontFamily: 'Inter,sans-serif', resize: 'none', minHeight: 80, lineHeight: 1.5 }}
               />
               {imagePreview && (
-                <div className="relative mt-2 rounded-2xl overflow-hidden">
-                  <img src={imagePreview} alt="Preview" className="w-full max-h-64 object-cover" />
-                  <button
-                    onClick={() => { setImage(null); setImagePreview(null); }}
-                    className="absolute top-2 right-2 bg-black bg-opacity-60 text-white rounded-full w-7 h-7 flex items-center justify-center text-sm font-bold"
-                  >✕</button>
+                <div style={{ position: 'relative', marginBottom: 12, borderRadius: 16, overflow: 'hidden' }}>
+                  <img src={imagePreview} alt="Preview" style={{ width: '100%', maxHeight: 200, objectFit: 'cover' }} />
+                  <button onClick={() => { setImage(null); setImagePreview(null); }}
+                    style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%', background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                 </div>
               )}
-              <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--border)]">
-                <label className="cursor-pointer text-[var(--accent)] hover:bg-blue-50 dark:hover:bg-blue-950 p-2 rounded-full transition-colors">
-                  <Image size={20} />
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 12, borderTop: '0.5px solid rgba(139,92,246,0.15)' }}>
+                <label style={{ cursor: 'pointer', color: '#a78bfa', fontSize: 20 }}>
+                  📷
+                  <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageChange} />
                 </label>
-                <button
-                  onClick={createPost}
-                  disabled={loading || (!content.trim() && !image)}
-                  className="bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold px-5 py-2 rounded-full transition-colors disabled:opacity-50 text-sm"
-                >
+                <button onClick={createPost} disabled={loading || (!content.trim() && !image)}
+                  style={{ padding: '8px 24px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: (loading || (!content.trim() && !image)) ? 0.5 : 1, fontFamily: 'Inter,sans-serif', boxShadow: '0 2px 12px rgba(139,92,246,0.3)' }}>
                   {loading ? 'Posting...' : 'Post'}
                 </button>
               </div>
@@ -251,152 +235,134 @@ export default function Feed() {
 
         {/* Posts */}
         {posts.length === 0 ? (
-          <p className="text-center text-[var(--muted)] py-16">No posts yet. Be the first!</p>
-        ) : (
-          posts.map((post) => {
-            const liked = post.likes?.includes(user?.uid);
-            const likeCount = post.likes?.length || 0;
-            const isOwner = post.userId === user?.uid;
-            const isBookmarked = userProfile?.bookmarks?.includes(post.id);
-            const alreadyReposted = post.reposts?.includes(user?.uid);
-            const repostCount = post.reposts?.length || 0;
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280' }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>✨</div>
+            <p>No posts yet. Be the first!</p>
+          </div>
+        ) : posts.map((post) => {
+          const liked = post.likes?.includes(user?.uid);
+          const likeCount = post.likes?.length || 0;
+          const isOwner = post.userId === user?.uid;
+          const isBookmarked = userProfile?.bookmarks?.includes(post.id);
+          const alreadyReposted = post.reposts?.includes(user?.uid);
+          const repostCount = post.reposts?.length || 0;
 
-            return (
-              <div key={post.id} className="border-b border-[var(--border)] p-4 post-hover transition-colors cursor-pointer">
+          return (
+            <div key={post.id} style={{ padding: '16px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', transition: 'background 0.2s' }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.03)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
 
-                {post.isRepost && (
-                  <p className="text-xs text-[var(--muted)] mb-2 flex items-center gap-1 ml-13">
-                    <Repeat2 size={14} /> Reposted from @{post.originalUsername}
-                  </p>
-                )}
+              {post.isRepost && (
+                <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4, marginLeft: 52 }}>
+                  🔄 Reposted from <span style={{ color: '#a78bfa', fontWeight: 600 }}>@{post.originalUsername}</span>
+                </p>
+              )}
 
-                <div className="flex gap-3">
-                  {/* Avatar */}
-                  <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center font-bold text-sm shrink-0"
-                    style={{ color: 'var(--foreground)' }}>
-                    {post.fullName?.[0]?.toUpperCase() || 'U'}
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', border: '1px solid rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, color: '#a78bfa', flexShrink: 0 }}>
+                  {post.fullName?.[0]?.toUpperCase() || 'U'}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#f3f4f6' }}>{post.fullName}</span>
+                      <span style={{ fontSize: 12, color: '#6b7280' }}>@{post.username}</span>
+                      {post.edited && <span style={{ fontSize: 10, color: '#4b5563', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4 }}>edited</span>}
+                      <span style={{ fontSize: 11, color: '#4b5563' }}>
+                        {post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : 'now'}
+                      </span>
+                    </div>
+                    {isOwner && editingPost !== post.id && (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => { setEditingPost(post.id); setEditContent(post.content); }}
+                          style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '2px 6px', borderRadius: 6, transition: 'color 0.2s' }}>✏️</button>
+                        <button onClick={() => deletePost(post.id)}
+                          style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '2px 6px', borderRadius: 6 }}>🗑️</button>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    {/* Post Header */}
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm" style={{ color: 'var(--foreground)' }}>{post.fullName}</span>
-                        <span className="text-[var(--muted)] text-sm">@{post.username}</span>
-                        {post.edited && <span className="text-[var(--muted)] text-xs">· edited</span>}
-                        <span className="text-[var(--muted)] text-xs">·</span>
-                        <span className="text-[var(--muted)] text-xs">
-                          {post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : 'now'}
-                        </span>
+                  {editingPost === post.id ? (
+                    <div style={{ marginBottom: 12 }}>
+                      <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)}
+                        style={{ ...inputStyle, minHeight: 80, resize: 'none' as const, marginBottom: 8 }} />
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => saveEdit(post.id)} style={{ padding: '6px 18px', borderRadius: 16, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Save</button>
+                        <button onClick={() => setEditingPost(null)} style={{ padding: '6px 18px', borderRadius: 16, background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Cancel</button>
                       </div>
-                      {isOwner && (
-                        <div className="flex gap-1">
-                          <button onClick={() => { setEditingPost(post.id); setEditContent(post.content); }}
-                            className="p-1.5 rounded-full hover:bg-blue-50 dark:hover:bg-blue-950 text-[var(--muted)] hover:text-[var(--accent)] transition-colors">
-                            <Pencil size={15} />
-                          </button>
-                          <button onClick={() => deletePost(post.id)}
-                            className="p-1.5 rounded-full hover:bg-red-50 dark:hover:bg-red-950 text-[var(--muted)] hover:text-red-500 transition-colors">
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      )}
                     </div>
+                  ) : (
+                    <>
+                      {post.content && <p style={{ fontSize: 14, color: '#d1d5db', lineHeight: 1.6, marginBottom: 12 }}>{post.content}</p>}
+                      {post.imageUrl && <img src={post.imageUrl} alt="Post" style={{ width: '100%', borderRadius: 16, maxHeight: 360, objectFit: 'cover', marginBottom: 12, border: '0.5px solid rgba(139,92,246,0.1)' }} />}
+                    </>
+                  )}
 
-                    {/* Edit Mode */}
-                    {editingPost === post.id ? (
-                      <div className="mb-2">
-                        <Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={3} className="mb-2 text-sm" />
-                        <div className="flex gap-2">
-                          <button onClick={() => saveEdit(post.id)} className="bg-[var(--accent)] text-white text-xs font-bold px-4 py-1.5 rounded-full">Save</button>
-                          <button onClick={() => setEditingPost(null)} className="border border-[var(--border)] text-xs font-bold px-4 py-1.5 rounded-full" style={{ color: 'var(--foreground)' }}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        {post.content && <p className="text-sm mb-3 leading-relaxed" style={{ color: 'var(--foreground)' }}>{post.content}</p>}
-                        {post.imageUrl && <img src={post.imageUrl} alt="Post" className="w-full rounded-2xl max-h-96 object-cover mb-3" />}
-                      </>
+                  {/* Actions */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+                    <button onClick={() => toggleComments(post.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif', transition: 'color 0.2s' }}>
+                      💬 <span>{(comments[post.id] || []).length || ''}</span>
+                    </button>
+
+                    {!isOwner && (
+                      <button onClick={() => repost(post)} disabled={repostingId === post.id}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: alreadyReposted ? '#34d399' : '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif', transition: 'color 0.2s' }}>
+                        🔄 <span>{repostCount || ''}</span>
+                      </button>
                     )}
 
-                    {/* Action Bar */}
-                    <div className="flex items-center justify-between max-w-xs">
-                      <button onClick={() => toggleComments(post.id)}
-                        className="flex items-center gap-1.5 text-[var(--muted)] hover:text-[var(--accent)] group transition-colors">
-                        <span className="p-1.5 rounded-full group-hover:bg-blue-50 dark:group-hover:bg-blue-950 transition-colors">
-                          <MessageCircle size={18} />
-                        </span>
-                        <span className="text-xs">{(comments[post.id] || []).length || ''}</span>
-                      </button>
+                    <button onClick={() => toggleLike(post)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: liked ? '#f472b6' : '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif', transition: 'color 0.2s' }}>
+                      {liked ? '❤️' : '🤍'} <span>{likeCount || ''}</span>
+                    </button>
 
-                      {!isOwner && (
-                        <button onClick={() => repost(post)} disabled={repostingId === post.id}
-                          className={`flex items-center gap-1.5 group transition-colors ${alreadyReposted ? 'text-green-500' : 'text-[var(--muted)] hover:text-green-500'}`}>
-                          <span className="p-1.5 rounded-full group-hover:bg-green-50 dark:group-hover:bg-green-950 transition-colors">
-                            <Repeat2 size={18} />
-                          </span>
-                          <span className="text-xs">{repostCount || ''}</span>
-                        </button>
-                      )}
+                    <button onClick={() => toggleBookmark(post.id)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: isBookmarked ? '#60a5fa' : '#6b7280', cursor: 'pointer', fontSize: 16, marginLeft: 'auto', transition: 'color 0.2s' }}>
+                      {isBookmarked ? '🔖' : '📄'}
+                    </button>
+                  </div>
 
-                      <button onClick={() => toggleLike(post)}
-                        className={`flex items-center gap-1.5 group transition-colors ${liked ? 'text-red-500' : 'text-[var(--muted)] hover:text-red-500'}`}>
-                        <span className="p-1.5 rounded-full group-hover:bg-red-50 dark:group-hover:bg-red-950 transition-colors">
-                          <Heart size={18} fill={liked ? 'currentColor' : 'none'} />
-                        </span>
-                        <span className="text-xs">{likeCount || ''}</span>
-                      </button>
-
-                      <button onClick={() => toggleBookmark(post.id)}
-                        className={`flex items-center gap-1.5 group transition-colors ${isBookmarked ? 'text-[var(--accent)]' : 'text-[var(--muted)] hover:text-[var(--accent)]'}`}>
-                        <span className="p-1.5 rounded-full group-hover:bg-blue-50 dark:group-hover:bg-blue-950 transition-colors">
-                          <Bookmark size={18} fill={isBookmarked ? 'currentColor' : 'none'} />
-                        </span>
-                      </button>
-                    </div>
-
-                    {/* Comments */}
-                    {showComments[post.id] && (
-                      <div className="mt-3 space-y-3">
-                        {(comments[post.id] || []).length === 0 ? (
-                          <p className="text-xs text-[var(--muted)]">No replies yet.</p>
-                        ) : (
-                          (comments[post.id] || []).map((comment) => (
-                            <div key={comment.id} className="flex gap-2">
-                              <div className="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-xs font-bold shrink-0"
-                                style={{ color: 'var(--foreground)' }}>
+                  {/* Comments */}
+                  {showComments[post.id] && (
+                    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '0.5px solid rgba(255,255,255,0.04)' }}>
+                      {(comments[post.id] || []).length === 0 ? (
+                        <p style={{ fontSize: 12, color: '#6b7280' }}>No replies yet.</p>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
+                          {(comments[post.id] || []).map((comment) => (
+                            <div key={comment.id} style={{ display: 'flex', gap: 10 }}>
+                              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#a78bfa', flexShrink: 0 }}>
                                 {comment.fullName?.[0]?.toUpperCase() || 'U'}
                               </div>
-                              <div className="flex-1">
-                                <span className="text-xs font-bold" style={{ color: 'var(--foreground)' }}>@{comment.username} </span>
-                                <span className="text-xs" style={{ color: 'var(--foreground)' }}>{comment.content}</span>
+                              <div style={{ background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '8px 12px', flex: 1 }}>
+                                <span style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa' }}>@{comment.username} </span>
+                                <span style={{ fontSize: 13, color: '#d1d5db' }}>{comment.content}</span>
                               </div>
                             </div>
-                          ))
-                        )}
-                        <div className="flex gap-2 mt-2">
-                          <Input
-                            placeholder="Post your reply..."
-                            value={commentInputs[post.id] || ''}
-                            onChange={(e) => setCommentInputs((prev) => ({ ...prev, [post.id]: e.target.value }))}
-                            onKeyDown={(e) => { if (e.key === 'Enter') addComment(post); }}
-                            className="text-sm rounded-full border-[var(--border)] bg-transparent"
-                            style={{ color: 'var(--foreground)' }}
-                          />
-                          <button
-                            onClick={() => addComment(post)}
-                            disabled={!commentInputs[post.id]?.trim()}
-                            className="bg-[var(--accent)] text-white text-xs font-bold px-4 rounded-full disabled:opacity-50"
-                          >Reply</button>
+                          ))}
                         </div>
+                      )}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <input
+                          placeholder="Write a reply..."
+                          value={commentInputs[post.id] || ''}
+                          onChange={(e) => setCommentInputs((prev) => ({ ...prev, [post.id]: e.target.value }))}
+                          onKeyDown={(e) => { if (e.key === 'Enter') addComment(post); }}
+                          style={{ ...inputStyle, flex: 1, padding: '8px 14px', fontSize: 13, borderRadius: 20 }}
+                        />
+                        <button onClick={() => addComment(post)} disabled={!commentInputs[post.id]?.trim()}
+                          style={{ padding: '8px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif', opacity: !commentInputs[post.id]?.trim() ? 0.5 : 1 }}>
+                          Reply
+                        </button>
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            );
-          })
-        )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

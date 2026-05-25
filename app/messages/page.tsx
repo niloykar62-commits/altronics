@@ -1,25 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  collection,
-  addDoc,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-  doc,
-  getDoc,
-  where,
-  onSnapshot,
+  collection, addDoc, getDocs, orderBy, query,
+  serverTimestamp, doc, getDoc, onSnapshot,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
 
 export default function Messages() {
   const [user, setUser] = useState<any>(null);
@@ -30,14 +19,12 @@ export default function Messages() {
   const [newMessage, setNewMessage] = useState('');
   const [pageLoading, setPageLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        router.push('/login');
-        return;
-      }
+      if (!firebaseUser) { router.push('/login'); return; }
       setUser(firebaseUser);
       const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
       if (profileDoc.exists()) setUserProfile(profileDoc.data());
@@ -49,63 +36,42 @@ export default function Messages() {
 
   useEffect(() => {
     if (!user || !selectedUser) return;
-
     const chatId = getChatId(user.uid, selectedUser.id);
-    const q = query(
-      collection(db, 'chats', chatId, 'messages'),
-      orderBy('createdAt', 'asc')
-    );
-
+    const q = query(collection(db, 'chats', chatId, 'messages'), orderBy('createdAt', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const msgs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setMessages(msgs);
+      setMessages(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     });
-
     return () => unsubscribe();
   }, [selectedUser, user]);
 
-  const getChatId = (uid1: string, uid2: string) => {
-    return [uid1, uid2].sort().join('_');
-  };
+  const getChatId = (uid1: string, uid2: string) => [uid1, uid2].sort().join('_');
 
   const loadUsers = async (uid: string) => {
     try {
       const snapshot = await getDocs(collection(db, 'users'));
-      const users = snapshot.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((u: any) => u.id !== uid);
-      setAllUsers(users);
-    } catch (err) {
-      console.error('Load users error:', err);
-    }
+      setAllUsers(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u: any) => u.id !== uid));
+    } catch (err) { console.error(err); }
   };
 
   const sendMessage = async () => {
     if (!newMessage.trim() || !user || !selectedUser) return;
     const chatId = getChatId(user.uid, selectedUser.id);
-
+    const text = newMessage.trim();
+    setNewMessage('');
     try {
       await addDoc(collection(db, 'chats', chatId, 'messages'), {
         senderId: user.uid,
         senderUsername: userProfile?.username || 'anonymous',
-        content: newMessage.trim(),
+        content: text,
         createdAt: serverTimestamp(),
       });
-
-      // Send notification
       await addDoc(collection(db, 'notifications'), {
-        toUserId: selectedUser.id,
-        fromUserId: user.uid,
+        toUserId: selectedUser.id, fromUserId: user.uid,
         fromUsername: userProfile?.username || 'someone',
-        type: 'message',
-        read: false,
-        createdAt: serverTimestamp(),
+        type: 'message', read: false, createdAt: serverTimestamp(),
       });
-
-      setNewMessage('');
-    } catch (err: any) {
-      console.error('Send message error:', err);
-    }
+    } catch (err) { console.error(err); }
   };
 
   const filteredUsers = allUsers.filter((u: any) =>
@@ -113,10 +79,22 @@ export default function Messages() {
     u.fullName?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const avatarColors = ['rgba(139,92,246,0.3)', 'rgba(59,130,246,0.3)', 'rgba(236,72,153,0.3)', 'rgba(52,211,153,0.3)'];
+  const avatarText = ['#a78bfa', '#60a5fa', '#f472b6', '#34d399'];
+  const getAvatarStyle = (idx: number) => ({
+    background: `linear-gradient(135deg, ${avatarColors[idx % 4]}, ${avatarColors[(idx + 1) % 4]})`,
+    color: avatarText[idx % 4],
+    border: `1px solid ${avatarText[idx % 4]}44`,
+  });
+
   if (pageLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Loading messages...</p>
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid rgba(139,92,246,0.3)', borderTopColor: '#a78bfa', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
+          <p style={{ color: '#6b7280', fontSize: 13 }}>Loading messages...</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
@@ -124,93 +102,101 @@ export default function Messages() {
   return (
     <>
       <Navbar />
-      <div className="max-w-4xl mx-auto p-4 pt-6">
-        <h1 className="text-xl font-bold mb-4 dark:text-white">💬 Direct Messages</h1>
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif', display: 'flex', flexDirection: 'column' }}>
 
-        <div className="flex gap-4 h-[70vh]">
+        {/* Page title */}
+        <div style={{ maxWidth: 900, margin: '0 auto', width: '100%', padding: '20px 20px 0' }}>
+          <h1 style={{ fontSize: 20, fontWeight: 700, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 16 }}>
+            💬 Messages
+          </h1>
+        </div>
 
-          {/* Users List */}
-          <div className="w-1/3 flex flex-col gap-2">
-            <Input
-              placeholder="Search users..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="mb-1"
-            />
-            <div className="overflow-y-auto space-y-2 flex-1">
+        {/* Main layout */}
+        <div style={{ maxWidth: 900, margin: '0 auto', width: '100%', padding: '0 20px 100px', display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
+
+          {/* ── Users sidebar ── */}
+          <div style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Search */}
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 16, color: '#6b7280' }}>🔍</span>
+              <input
+                placeholder="Search users..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ width: '100%', padding: '10px 14px 10px 36px', background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)', borderRadius: 12, color: '#f3f4f6', fontSize: 13, fontFamily: 'Inter,sans-serif', outline: 'none' }}
+              />
+            </div>
+
+            {/* User list */}
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
               {filteredUsers.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-4">No users found</p>
+                <p style={{ textAlign: 'center', color: '#4b5563', fontSize: 12, padding: '20px 0' }}>No users found</p>
               ) : (
-                filteredUsers.map((u: any) => (
-                  <div
-                    key={u.id}
-                    onClick={() => setSelectedUser(u)}
-                    className={`flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors ${
-                      selectedUser?.id === u.id
-                        ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900'
-                        : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                  >
-                    <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center font-bold text-sm shrink-0">
-                      {u.fullName?.[0]?.toUpperCase() || 'U'}
+                filteredUsers.map((u: any, idx) => {
+                  const isSelected = selectedUser?.id === u.id;
+                  return (
+                    <div
+                      key={u.id}
+                      onClick={() => setSelectedUser(u)}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 14, cursor: 'pointer', background: isSelected ? 'rgba(139,92,246,0.15)' : 'transparent', border: isSelected ? '0.5px solid rgba(139,92,246,0.3)' : '0.5px solid transparent', transition: 'all 0.2s' }}
+                    >
+                      <div style={{ width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, flexShrink: 0, ...getAvatarStyle(idx) }}>
+                        {u.fullName?.[0]?.toUpperCase() || 'U'}
+                      </div>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.fullName}</p>
+                        <p style={{ fontSize: 11, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>@{u.username}</p>
+                      </div>
+                      {isSelected && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#a78bfa', flexShrink: 0 }} />}
                     </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{u.fullName}</p>
-                      <p className="text-xs text-gray-400 truncate">@{u.username}</p>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
 
-          {/* Chat Window */}
-          <div className="flex-1 flex flex-col">
+          {/* ── Chat window ── */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'rgba(17,17,24,0.8)', backdropFilter: 'blur(20px)', border: '0.5px solid rgba(139,92,246,0.2)', borderRadius: 20, overflow: 'hidden', minHeight: 500 }}>
+
             {!selectedUser ? (
-              <div className="flex-1 flex items-center justify-center bg-white dark:bg-gray-800 rounded-lg">
-                <p className="text-gray-400 text-sm">Select a user to start chatting</p>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+                <span style={{ fontSize: 48 }}>💬</span>
+                <p style={{ color: '#6b7280', fontSize: 14 }}>Select someone to start chatting</p>
               </div>
             ) : (
-              <Card className="flex-1 flex flex-col overflow-hidden">
-                {/* Chat Header */}
-                <div className="p-3 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center font-bold text-sm">
+              <>
+                {/* Chat header */}
+                <div style={{ padding: '14px 18px', borderBottom: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', gap: 10, background: 'rgba(139,92,246,0.05)' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, ...getAvatarStyle(allUsers.findIndex(u => u.id === selectedUser.id)) }}>
                     {selectedUser.fullName?.[0]?.toUpperCase() || 'U'}
                   </div>
                   <div>
-                    <p className="font-semibold text-sm dark:text-white">{selectedUser.fullName}</p>
-                    <p className="text-xs text-gray-400">@{selectedUser.username}</p>
+                    <p style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6', marginBottom: 1 }}>{selectedUser.fullName}</p>
+                    <p style={{ fontSize: 11, color: '#a78bfa' }}>@{selectedUser.username}</p>
                   </div>
                 </div>
 
                 {/* Messages */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <div style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
                   {messages.length === 0 ? (
-                    <p className="text-center text-gray-400 text-sm py-8">
-                      No messages yet. Say hello! 👋
-                    </p>
+                    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 36 }}>👋</span>
+                      <p style={{ color: '#6b7280', fontSize: 13 }}>No messages yet. Say hello!</p>
+                    </div>
                   ) : (
                     messages.map((msg) => {
                       const isMe = msg.senderId === user?.uid;
                       return (
-                        <div
-                          key={msg.id}
-                          className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}
-                        >
-                          <div
-                            className={`max-w-xs px-4 py-2 rounded-2xl text-sm ${
-                              isMe
-                                ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-br-sm'
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-bl-sm'
-                            }`}
-                          >
-                            <p>{msg.content}</p>
-                            <p className={`text-xs mt-1 ${isMe ? 'text-gray-400' : 'text-gray-400'}`}>
+                        <div key={msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+                          <div style={{
+                            maxWidth: '70%', padding: '10px 14px', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                            background: isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)',
+                            border: isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)',
+                          }}>
+                            <p style={{ fontSize: 13, color: '#f3f4f6', lineHeight: 1.5, marginBottom: 4 }}>{msg.content}</p>
+                            <p style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563', textAlign: isMe ? 'right' : 'left' }}>
                               {msg.createdAt?.toDate
-                                ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], {
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                  })
+                                ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                                 : ''}
                             </p>
                           </div>
@@ -218,22 +204,27 @@ export default function Messages() {
                       );
                     })
                   )}
+                  <div ref={messagesEndRef} />
                 </div>
 
-                {/* Message Input */}
-                <div className="p-3 border-t border-gray-100 dark:border-gray-700 flex gap-2">
-                  <Input
+                {/* Input */}
+                <div style={{ padding: '12px 16px', borderTop: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <input
                     placeholder="Type a message..."
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                    className="flex-1"
+                    style={{ flex: 1, padding: '11px 16px', background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)', borderRadius: 14, color: '#f3f4f6', fontSize: 13, fontFamily: 'Inter,sans-serif', outline: 'none' }}
                   />
-                  <Button onClick={sendMessage} disabled={!newMessage.trim()}>
-                    Send
-                  </Button>
+                  <button
+                    onClick={sendMessage}
+                    disabled={!newMessage.trim()}
+                    style={{ width: 42, height: 42, borderRadius: '50%', background: newMessage.trim() ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(139,92,246,0.1)', border: 'none', cursor: newMessage.trim() ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, transition: 'all 0.2s', boxShadow: newMessage.trim() ? '0 4px 16px rgba(139,92,246,0.35)' : 'none' }}
+                  >
+                    ➤
+                  </button>
                 </div>
-              </Card>
+              </>
             )}
           </div>
         </div>

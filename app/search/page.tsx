@@ -5,18 +5,32 @@ import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  collection,
-  getDocs,
-  doc,
-  updateDoc,
-  arrayUnion,
-  arrayRemove,
-  getDoc,
+  collection, getDocs, doc, updateDoc, arrayUnion, arrayRemove, getDoc,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+
+const TRENDING_TAGS = [
+  { label: '#design',  style: 'purple' },
+  { label: '#coding',  style: 'blue' },
+  { label: '#art',     style: 'pink' },
+  { label: '#tech',    style: 'green' },
+  { label: '#gaming',  style: 'purple' },
+  { label: '#startup', style: 'blue' },
+];
+
+const TAG_COLORS: Record<string, { bg: string; color: string; border: string }> = {
+  purple: { bg: 'rgba(139,92,246,0.12)', color: '#a78bfa', border: 'rgba(139,92,246,0.3)' },
+  blue:   { bg: 'rgba(59,130,246,0.12)',  color: '#60a5fa', border: 'rgba(59,130,246,0.3)' },
+  pink:   { bg: 'rgba(236,72,153,0.12)', color: '#f472b6', border: 'rgba(236,72,153,0.3)' },
+  green:  { bg: 'rgba(52,211,153,0.12)', color: '#34d399', border: 'rgba(52,211,153,0.3)' },
+};
+
+const EXPLORE_CARDS = [
+  { emoji: '🎨', label: '#DigitalArt',  grad: 'linear-gradient(135deg,#1a0a2e,#0d1a2e)' },
+  { emoji: '💻', label: '#WebDev',      grad: 'linear-gradient(135deg,#0d1a2e,#0a2e1a)' },
+  { emoji: '🎮', label: '#Gaming',      grad: 'linear-gradient(135deg,#2e0a1a,#1a0a2e)' },
+  { emoji: '🚀', label: '#StartupLife', grad: 'linear-gradient(135deg,#1a2e0a,#0a1a2e)' },
+];
 
 export default function Search() {
   const [user, setUser] = useState<any>(null);
@@ -28,14 +42,12 @@ export default function Search() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'posts'>('users');
   const [pageLoading, setPageLoading] = useState(true);
+  const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
   const router = useRouter();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        router.push('/login');
-        return;
-      }
+      if (!firebaseUser) { router.push('/login'); return; }
       setUser(firebaseUser);
       await loadCurrentUserProfile(firebaseUser.uid);
       await loadAllUsers(firebaseUser.uid);
@@ -47,14 +59,18 @@ export default function Search() {
 
   const loadCurrentUserProfile = async (uid: string) => {
     const profileDoc = await getDoc(doc(db, 'users', uid));
-    if (profileDoc.exists()) setUserProfile(profileDoc.data());
+    if (profileDoc.exists()) {
+      const data = profileDoc.data();
+      setUserProfile(data);
+      const map: Record<string, boolean> = {};
+      (data.following || []).forEach((id: string) => { map[id] = true; });
+      setFollowingMap(map);
+    }
   };
 
   const loadAllUsers = async (uid: string) => {
     const snapshot = await getDocs(collection(db, 'users'));
-    const users = snapshot.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((u: any) => u.id !== uid);
+    const users = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u: any) => u.id !== uid);
     setAllUsers(users);
     setFilteredUsers(users);
   };
@@ -69,180 +85,240 @@ export default function Search() {
   const handleSearch = (q: string) => {
     setSearchQuery(q);
     const lower = q.toLowerCase();
-
-    if (!q.trim()) {
-      setFilteredUsers(allUsers);
-      setFilteredPosts(allPosts);
-      return;
-    }
-
-    // Filter users
-    setFilteredUsers(
-      allUsers.filter(
-        (u: any) =>
-          u.username?.toLowerCase().includes(lower) ||
-          u.fullName?.toLowerCase().includes(lower) ||
-          u.bio?.toLowerCase().includes(lower)
-      )
-    );
-
-    // Filter posts
-    setFilteredPosts(
-      allPosts.filter((p: any) =>
-        p.content?.toLowerCase().includes(lower) ||
-        p.username?.toLowerCase().includes(lower) ||
-        p.fullName?.toLowerCase().includes(lower)
-      )
-    );
+    if (!q.trim()) { setFilteredUsers(allUsers); setFilteredPosts(allPosts); return; }
+    setFilteredUsers(allUsers.filter((u: any) =>
+      u.username?.toLowerCase().includes(lower) || u.fullName?.toLowerCase().includes(lower) || u.bio?.toLowerCase().includes(lower)
+    ));
+    setFilteredPosts(allPosts.filter((p: any) =>
+      p.content?.toLowerCase().includes(lower) || p.username?.toLowerCase().includes(lower) || p.fullName?.toLowerCase().includes(lower)
+    ));
   };
 
   const toggleFollow = async (targetUserId: string) => {
     if (!user) return;
-    const isFollowing = userProfile?.following?.includes(targetUserId);
-    const myRef = doc(db, 'users', user.uid);
-    const targetRef = doc(db, 'users', targetUserId);
-
+    const isFollowing = followingMap[targetUserId];
+    setFollowingMap((prev) => ({ ...prev, [targetUserId]: !isFollowing }));
     try {
-      await updateDoc(myRef, {
+      await updateDoc(doc(db, 'users', user.uid), {
         following: isFollowing ? arrayRemove(targetUserId) : arrayUnion(targetUserId),
       });
-      await updateDoc(targetRef, {
+      await updateDoc(doc(db, 'users', targetUserId), {
         followers: isFollowing ? arrayRemove(user.uid) : arrayUnion(user.uid),
       });
-      await loadCurrentUserProfile(user.uid);
     } catch (err) {
-      console.error('Follow error:', err);
+      setFollowingMap((prev) => ({ ...prev, [targetUserId]: isFollowing }));
+      console.error(err);
     }
+  };
+
+  const avatarColors = [
+    { bg: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', color: '#a78bfa', border: 'rgba(139,92,246,0.3)' },
+    { bg: 'linear-gradient(135deg,rgba(59,130,246,0.3),rgba(52,211,153,0.3))', color: '#60a5fa', border: 'rgba(59,130,246,0.3)' },
+    { bg: 'linear-gradient(135deg,rgba(236,72,153,0.3),rgba(139,92,246,0.3))', color: '#f472b6', border: 'rgba(236,72,153,0.3)' },
+  ];
+
+  const inputStyle = {
+    width: '100%', padding: '12px 16px 12px 40px',
+    background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)',
+    borderRadius: 14, color: '#f3f4f6', fontSize: 14,
+    fontFamily: 'Inter,sans-serif', outline: 'none',
   };
 
   if (pageLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-500 text-sm">Loading...</p>
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid rgba(139,92,246,0.3)', borderTopColor: '#a78bfa', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
+          <p style={{ color: '#6b7280', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>Loading...</p>
+        </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
+  const showExplore = !searchQuery.trim();
+
   return (
     <>
       <Navbar />
-      <div className="max-w-2xl mx-auto p-4 pt-6">
-        <h1 className="text-xl font-bold mb-4 dark:text-white">🔍 Search</h1>
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif', paddingBottom: 100 }}>
+        <div style={{ maxWidth: 600, margin: '0 auto', padding: '20px 16px 0' }}>
 
-        {/* Search Input */}
-        <Input
-          placeholder="Search users, posts, keywords..."
-          value={searchQuery}
-          onChange={(e) => handleSearch(e.target.value)}
-          className="mb-4"
-          autoFocus
-        />
+          {/* Title */}
+          <h1 style={{ fontSize: 20, fontWeight: 700, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginBottom: 16 }}>
+            🔍 Explore
+          </h1>
 
-        {/* Tabs */}
-        <div className="flex gap-2 mb-4">
-          <Button
-            size="sm"
-            variant={activeTab === 'users' ? 'default' : 'outline'}
-            onClick={() => setActiveTab('users')}
-          >
-            👤 Users ({filteredUsers.length})
-          </Button>
-          <Button
-            size="sm"
-            variant={activeTab === 'posts' ? 'default' : 'outline'}
-            onClick={() => setActiveTab('posts')}
-          >
-            📝 Posts ({filteredPosts.length})
-          </Button>
-        </div>
+          {/* Search input */}
+          <div style={{ position: 'relative', marginBottom: 16 }}>
+            <span style={{ position: 'absolute', left: 13, top: '50%', transform: 'translateY(-50%)', fontSize: 16, color: '#6b7280' }}>🔍</span>
+            <input
+              autoFocus
+              placeholder="Search people, posts, keywords..."
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              style={inputStyle}
+            />
+            {searchQuery && (
+              <button onClick={() => handleSearch('')} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>✕</button>
+            )}
+          </div>
 
-        {/* Users Tab */}
-        {activeTab === 'users' && (
-          <div className="space-y-3">
-            {filteredUsers.length === 0 ? (
-              <p className="text-center text-gray-400 py-8">No users found.</p>
-            ) : (
-              filteredUsers.map((u: any) => {
-                const isFollowing = userProfile?.following?.includes(u.id);
-                return (
-                  <Card key={u.id}>
-                    <CardContent className="p-4 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300">
-                          {u.fullName?.[0]?.toUpperCase() || 'U'}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-sm dark:text-white">{u.fullName}</p>
-                          <p className="text-xs text-gray-400">@{u.username}</p>
-                          {u.bio && (
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                              {u.bio}
-                            </p>
-                          )}
-                          <p className="text-xs text-gray-400 mt-0.5">
-                            {u.followers?.length || 0} followers
-                          </p>
-                        </div>
+          {/* ── Explore (no query) ── */}
+          {showExplore && (
+            <>
+              {/* Trending tags */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 24 }}>
+                {TRENDING_TAGS.map((tag) => {
+                  const c = TAG_COLORS[tag.style];
+                  return (
+                    <button
+                      key={tag.label}
+                      onClick={() => handleSearch(tag.label)}
+                      style={{ padding: '5px 12px', borderRadius: 20, background: c.bg, border: `0.5px solid ${c.border}`, color: c.color, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                    >
+                      {tag.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Trending section label */}
+              <p style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>Trending</p>
+
+              {/* Explore grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 28 }}>
+                {EXPLORE_CARDS.map((card) => (
+                  <div key={card.label} style={{ borderRadius: 16, overflow: 'hidden', background: card.grad, border: '0.5px solid rgba(139,92,246,0.15)', cursor: 'pointer' }}>
+                    <div style={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36 }}>{card.emoji}</div>
+                    <div style={{ padding: '8px 12px 12px', fontSize: 12, fontWeight: 600, color: '#9ca3af' }}>{card.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Suggested users */}
+              <p style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>Suggested People</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {allUsers.slice(0, 5).map((u: any, idx) => {
+                  const av = avatarColors[idx % 3];
+                  const isFollowing = followingMap[u.id];
+                  return (
+                    <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+                      <div style={{ width: 42, height: 42, borderRadius: '50%', background: av.bg, border: `1px solid ${av.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, color: av.color, flexShrink: 0 }}>
+                        {u.fullName?.[0]?.toUpperCase() || 'U'}
                       </div>
-                      <Button
-                        size="sm"
-                        variant={isFollowing ? 'outline' : 'default'}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 1 }}>{u.fullName}</p>
+                        <p style={{ fontSize: 11, color: '#6b7280' }}>@{u.username} · {u.followers?.length || 0} followers</p>
+                      </div>
+                      <button
                         onClick={() => toggleFollow(u.id)}
+                        style={{ padding: '6px 14px', borderRadius: 20, background: isFollowing ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: isFollowing ? '0.5px solid rgba(255,255,255,0.12)' : 'none', color: isFollowing ? '#9ca3af' : 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}
                       >
-                        {isFollowing ? 'Unfollow' : 'Follow'}
-                      </Button>
-                    </CardContent>
-                  </Card>
-                );
-              })
-            )}
-          </div>
-        )}
+                        {isFollowing ? 'Following' : 'Follow'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
-        {/* Posts Tab */}
-        {activeTab === 'posts' && (
-          <div className="space-y-3">
-            {filteredPosts.length === 0 ? (
-              <p className="text-center text-gray-400 py-8">No posts found.</p>
-            ) : (
-              filteredPosts.map((post: any) => (
-                <Card key={post.id}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-7 h-7 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center font-bold text-xs text-gray-600 dark:text-gray-300">
-                        {post.fullName?.[0]?.toUpperCase() || 'U'}
-                      </div>
-                      <div>
-                        <span className="text-sm font-semibold dark:text-white">
-                          {post.fullName}
-                        </span>
-                        <span className="text-xs text-gray-400 ml-1">@{post.username}</span>
-                      </div>
+          {/* ── Search results ── */}
+          {!showExplore && (
+            <>
+              {/* Tabs */}
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+                {(['users', 'posts'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    style={{ padding: '7px 16px', borderRadius: 20, background: activeTab === tab ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(139,92,246,0.08)', border: activeTab === tab ? 'none' : '0.5px solid rgba(139,92,246,0.2)', color: activeTab === tab ? 'white' : '#9ca3af', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    {tab === 'users' ? `👤 Users (${filteredUsers.length})` : `📝 Posts (${filteredPosts.length})`}
+                  </button>
+                ))}
+              </div>
+
+              {/* Users results */}
+              {activeTab === 'users' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {filteredUsers.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '60px 0' }}>
+                      <p style={{ fontSize: 36, marginBottom: 8 }}>🔍</p>
+                      <p style={{ color: '#6b7280', fontSize: 14 }}>No users found for "{searchQuery}"</p>
                     </div>
-                    <p className="text-sm text-gray-800 dark:text-gray-200">{post.content}</p>
-                    {post.imageUrl && (
-                      <img
-                        src={post.imageUrl}
-                        alt="Post"
-                        className="w-full rounded-lg max-h-48 object-cover mt-2"
-                      />
-                    )}
-                    <div className="flex items-center gap-3 mt-2">
-                      <span className="text-xs text-gray-400">
-                        ❤️ {post.likes?.length || 0} likes
-                      </span>
-                      <span className="text-xs text-gray-400">
-                        {post.createdAt?.toDate
-                          ? new Date(post.createdAt.toDate()).toLocaleDateString()
-                          : ''}
-                      </span>
+                  ) : (
+                    filteredUsers.map((u: any, idx) => {
+                      const av = avatarColors[idx % 3];
+                      const isFollowing = followingMap[u.id];
+                      return (
+                        <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+                          <div style={{ width: 44, height: 44, borderRadius: '50%', background: av.bg, border: `1px solid ${av.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, color: av.color, flexShrink: 0 }}>
+                            {u.fullName?.[0]?.toUpperCase() || 'U'}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 1 }}>{u.fullName}</p>
+                            <p style={{ fontSize: 11, color: '#6b7280', marginBottom: u.bio ? 2 : 0 }}>@{u.username} · {u.followers?.length || 0} followers</p>
+                            {u.bio && <p style={{ fontSize: 12, color: '#9ca3af', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.bio}</p>}
+                          </div>
+                          <button
+                            onClick={() => toggleFollow(u.id)}
+                            style={{ padding: '6px 14px', borderRadius: 20, background: isFollowing ? 'rgba(255,255,255,0.05)' : 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: isFollowing ? '0.5px solid rgba(255,255,255,0.12)' : 'none', color: isFollowing ? '#9ca3af' : 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}
+                          >
+                            {isFollowing ? 'Following' : 'Follow'}
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+
+              {/* Posts results */}
+              {activeTab === 'posts' && (
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {filteredPosts.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '60px 0' }}>
+                      <p style={{ fontSize: 36, marginBottom: 8 }}>📝</p>
+                      <p style={{ color: '#6b7280', fontSize: 14 }}>No posts found for "{searchQuery}"</p>
                     </div>
-                  </CardContent>
-                </Card>
-              ))
-            )}
-          </div>
-        )}
+                  ) : (
+                    filteredPosts.map((post: any, idx) => {
+                      const av = avatarColors[idx % 3];
+                      return (
+                        <div key={post.id} style={{ padding: '16px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+                          <div style={{ display: 'flex', gap: 10 }}>
+                            <div style={{ width: 36, height: 36, borderRadius: '50%', background: av.bg, border: `1px solid ${av.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: av.color, flexShrink: 0 }}>
+                              {post.fullName?.[0]?.toUpperCase() || 'U'}
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6' }}>{post.fullName}</span>
+                                <span style={{ fontSize: 11, color: '#6b7280' }}>@{post.username}</span>
+                                <span style={{ fontSize: 11, color: '#4b5563', marginLeft: 'auto' }}>
+                                  {post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : ''}
+                                </span>
+                              </div>
+                              <p style={{ fontSize: 13, color: '#d1d5db', lineHeight: 1.6, marginBottom: 8 }}>{post.content}</p>
+                              {post.imageUrl && (
+                                <img src={post.imageUrl} alt="Post" style={{ width: '100%', borderRadius: 12, maxHeight: 200, objectFit: 'cover', marginBottom: 8 }} />
+                              )}
+                              <div style={{ display: 'flex', gap: 16 }}>
+                                <span style={{ fontSize: 12, color: '#f472b6' }}>❤️ {post.likes?.length || 0}</span>
+                                <span style={{ fontSize: 12, color: '#60a5fa' }}>💬 {post.comments?.length || 0}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </>
   );
