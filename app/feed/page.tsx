@@ -41,6 +41,7 @@ export default function Feed() {
   const [comments, setComments] = useState<{ [key: string]: any[] }>({});
   const [editingPost, setEditingPost] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
+  const [repostingId, setRepostingId] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -97,6 +98,7 @@ export default function Feed() {
         imageUrl,
         createdAt: serverTimestamp(),
         likes: [],
+        reposts: [],
       });
       setContent(''); setImage(null); setImagePreview(null);
       await loadPosts();
@@ -143,29 +145,58 @@ export default function Feed() {
     } catch (err) { console.error('Like error:', err); }
   };
 
-  // ✅ Fixed bookmark function with instant UI update
   const toggleBookmark = async (postId: string) => {
     if (!user) return;
     const isBookmarked = userProfile?.bookmarks?.includes(postId);
-
-    // Update local state immediately so UI responds instantly
     setUserProfile((prev: any) => ({
       ...prev,
       bookmarks: isBookmarked
         ? (prev.bookmarks || []).filter((id: string) => id !== postId)
         : [...(prev.bookmarks || []), postId],
     }));
-
     try {
       await updateDoc(doc(db, 'users', user.uid), {
         bookmarks: isBookmarked ? arrayRemove(postId) : arrayUnion(postId),
       });
     } catch (err) {
       console.error('Bookmark error:', err);
-      // Revert on error
       const profileDoc = await getDoc(doc(db, 'users', user.uid));
       if (profileDoc.exists()) setUserProfile(profileDoc.data());
     }
+  };
+
+  const repost = async (post: any) => {
+    if (!user) return;
+    const alreadyReposted = post.reposts?.includes(user.uid);
+    if (alreadyReposted) {
+      alert('You already reposted this!');
+      return;
+    }
+    if (!confirm(`Repost this by @${post.username}?`)) return;
+    setRepostingId(post.id);
+    try {
+      // Add repost as new post in feed
+      await addDoc(collection(db, 'posts'), {
+        userId: user.uid,
+        username: userProfile?.username || 'anonymous',
+        fullName: userProfile?.fullName || user.displayName || 'User',
+        content: post.content,
+        imageUrl: post.imageUrl || null,
+        createdAt: serverTimestamp(),
+        likes: [],
+        reposts: [],
+        isRepost: true,
+        originalAuthor: post.fullName,
+        originalUsername: post.username,
+      });
+      // Mark post as reposted by this user
+      await updateDoc(doc(db, 'posts', post.id), {
+        reposts: arrayUnion(user.uid),
+      });
+      await sendNotification(post.userId, 'repost');
+      await loadPosts();
+    } catch (err) { console.error('Repost error:', err); }
+    setRepostingId(null);
   };
 
   const loadComments = async (postId: string) => {
@@ -242,10 +273,20 @@ export default function Feed() {
               const likeCount = post.likes?.length || 0;
               const isOwner = post.userId === user?.uid;
               const isBookmarked = userProfile?.bookmarks?.includes(post.id);
+              const alreadyReposted = post.reposts?.includes(user?.uid);
+              const repostCount = post.reposts?.length || 0;
 
               return (
                 <Card key={post.id}>
                   <CardContent className="p-5">
+
+                    {/* Repost label */}
+                    {post.isRepost && (
+                      <p className="text-xs text-gray-400 mb-2 flex items-center gap-1">
+                        🔄 Reposted from <span className="font-medium">@{post.originalUsername}</span>
+                      </p>
+                    )}
+
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 text-sm">
@@ -263,12 +304,9 @@ export default function Feed() {
                             <button onClick={() => deletePost(post.id)} className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded transition-colors">🗑️</button>
                           </>
                         )}
-                        {/* ✅ Fixed bookmark button with clear visual state */}
                         <button
                           onClick={() => toggleBookmark(post.id)}
-                          className={`text-xs px-2 py-1 rounded transition-colors ${
-                            isBookmarked ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-500'
-                          }`}
+                          className={`text-xs px-2 py-1 rounded transition-colors ${isBookmarked ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-500'}`}
                           title={isBookmarked ? 'Remove bookmark' : 'Save post'}
                         >
                           {isBookmarked ? '🔖' : '📄'}
@@ -295,13 +333,34 @@ export default function Feed() {
                       {post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleString() : 'Just now'}
                     </p>
 
-                    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100 dark:border-gray-800">
-                      <button onClick={() => toggleLike(post)} className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${liked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}`}>
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex-wrap">
+                      <button
+                        onClick={() => toggleLike(post)}
+                        className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${liked ? 'text-red-500' : 'text-gray-400 hover:text-red-400'}`}
+                      >
                         {liked ? '❤️' : '🤍'} {likeCount} {likeCount === 1 ? 'Like' : 'Likes'}
                       </button>
-                      <button onClick={() => toggleComments(post.id)} className="flex items-center gap-1.5 text-sm font-medium text-gray-400 hover:text-blue-400 transition-colors">
+
+                      <button
+                        onClick={() => toggleComments(post.id)}
+                        className="flex items-center gap-1.5 text-sm font-medium text-gray-400 hover:text-blue-400 transition-colors"
+                      >
                         💬 {showComments[post.id] ? 'Hide' : 'Comments'}
                       </button>
+
+                      {/* Repost Button */}
+                      {!isOwner && (
+                        <button
+                          onClick={() => repost(post)}
+                          disabled={repostingId === post.id}
+                          className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${
+                            alreadyReposted ? 'text-green-500' : 'text-gray-400 hover:text-green-500'
+                          }`}
+                        >
+                          🔄 {repostCount > 0 ? repostCount : ''} {alreadyReposted ? 'Reposted' : 'Repost'}
+                        </button>
+                      )}
                     </div>
 
                     {showComments[post.id] && (

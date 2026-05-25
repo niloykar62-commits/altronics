@@ -12,8 +12,6 @@ import {
   getDocs,
   updateDoc,
   doc,
-  addDoc,
-  serverTimestamp,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,10 +25,7 @@ export default function Notifications() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) {
-        router.push('/login');
-        return;
-      }
+      if (!firebaseUser) { router.push('/login'); return; }
       setUser(firebaseUser);
       await loadNotifications(firebaseUser.uid);
       setPageLoading(false);
@@ -46,10 +41,7 @@ export default function Notifications() {
         orderBy('createdAt', 'desc')
       );
       const snapshot = await getDocs(q);
-      const list = snapshot.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      }));
+      const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
       setNotifications(list);
     } catch (err) {
       console.error('Notifications error:', err);
@@ -60,9 +52,7 @@ export default function Notifications() {
     try {
       const unread = notifications.filter((n) => !n.read);
       await Promise.all(
-        unread.map((n) =>
-          updateDoc(doc(db, 'notifications', n.id), { read: true })
-        )
+        unread.map((n) => updateDoc(doc(db, 'notifications', n.id), { read: true }))
       );
       await loadNotifications(user.uid);
     } catch (err) {
@@ -70,11 +60,14 @@ export default function Notifications() {
     }
   };
 
+  // ✅ Updated with repost icon
   const getIcon = (type: string) => {
     switch (type) {
       case 'like': return '❤️';
       case 'comment': return '💬';
       case 'follow': return '👤';
+      case 'repost': return '🔄';
+      case 'message': return '📩';
       default: return '🔔';
     }
   };
@@ -111,25 +104,27 @@ export default function Notifications() {
 
         <div className="space-y-3">
           {notifications.length === 0 ? (
-            <p className="text-center text-gray-400 py-12">
-              No notifications yet.
-            </p>
+            <p className="text-center text-gray-400 py-12">No notifications yet.</p>
           ) : (
             notifications.map((n) => (
               <Card
                 key={n.id}
                 className={`transition-colors ${
-                  !n.read ? 'border-blue-200 bg-blue-50 dark:bg-blue-950 dark:border-blue-800' : ''
+                  !n.read
+                    ? 'border-blue-200 bg-blue-50 dark:bg-blue-950 dark:border-blue-800'
+                    : ''
                 }`}
               >
                 <CardContent className="p-4 flex items-center gap-3">
                   <span className="text-2xl">{getIcon(n.type)}</span>
                   <div className="flex-1">
                     <p className="text-sm dark:text-gray-200">
-                      <span className="font-semibold">{n.fromUsername}</span>{' '}
+                      <span className="font-semibold">@{n.fromUsername}</span>{' '}
                       {n.type === 'like' && 'liked your post'}
                       {n.type === 'comment' && `commented: "${n.commentText}"`}
                       {n.type === 'follow' && 'started following you'}
+                      {n.type === 'repost' && 'reposted your post'}
+                      {n.type === 'message' && 'sent you a message'}
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
                       {n.createdAt?.toDate
