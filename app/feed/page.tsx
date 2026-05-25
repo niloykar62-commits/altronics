@@ -97,7 +97,6 @@ export default function Feed() {
         imageUrl,
         createdAt: serverTimestamp(),
         likes: [],
-        reposts: [],
       });
       setContent(''); setImage(null); setImagePreview(null);
       await loadPosts();
@@ -144,16 +143,29 @@ export default function Feed() {
     } catch (err) { console.error('Like error:', err); }
   };
 
+  // ✅ Fixed bookmark function with instant UI update
   const toggleBookmark = async (postId: string) => {
     if (!user) return;
     const isBookmarked = userProfile?.bookmarks?.includes(postId);
+
+    // Update local state immediately so UI responds instantly
+    setUserProfile((prev: any) => ({
+      ...prev,
+      bookmarks: isBookmarked
+        ? (prev.bookmarks || []).filter((id: string) => id !== postId)
+        : [...(prev.bookmarks || []), postId],
+    }));
+
     try {
       await updateDoc(doc(db, 'users', user.uid), {
         bookmarks: isBookmarked ? arrayRemove(postId) : arrayUnion(postId),
       });
+    } catch (err) {
+      console.error('Bookmark error:', err);
+      // Revert on error
       const profileDoc = await getDoc(doc(db, 'users', user.uid));
       if (profileDoc.exists()) setUserProfile(profileDoc.data());
-    } catch (err) { console.error('Bookmark error:', err); }
+    }
   };
 
   const loadComments = async (postId: string) => {
@@ -244,15 +256,22 @@ export default function Feed() {
                           <p className="text-xs text-gray-400">@{post.username} {post.edited && '· edited'}</p>
                         </div>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex gap-1 items-center">
                         {isOwner && (
                           <>
                             <button onClick={() => startEdit(post)} className="text-xs text-gray-400 hover:text-blue-500 px-2 py-1 rounded transition-colors">✏️</button>
                             <button onClick={() => deletePost(post.id)} className="text-xs text-gray-400 hover:text-red-500 px-2 py-1 rounded transition-colors">🗑️</button>
                           </>
                         )}
-                        <button onClick={() => toggleBookmark(post.id)} className={`text-xs px-2 py-1 rounded transition-colors ${isBookmarked ? 'text-yellow-500' : 'text-gray-400 hover:text-yellow-500'}`}>
-                          {isBookmarked ? '🔖' : '🔖'}
+                        {/* ✅ Fixed bookmark button with clear visual state */}
+                        <button
+                          onClick={() => toggleBookmark(post.id)}
+                          className={`text-xs px-2 py-1 rounded transition-colors ${
+                            isBookmarked ? 'text-yellow-500' : 'text-gray-300 hover:text-yellow-500'
+                          }`}
+                          title={isBookmarked ? 'Remove bookmark' : 'Save post'}
+                        >
+                          {isBookmarked ? '🔖' : '📄'}
                         </button>
                       </div>
                     </div>
