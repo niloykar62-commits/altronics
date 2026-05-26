@@ -59,30 +59,49 @@ export default function Feed() {
     setImage(file); setImagePreview(URL.createObjectURL(file));
   };
 
+  // ✅ Fixed with debug logs
   const uploadToCloudinary = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', UPLOAD_PRESET!);
+    console.log('Uploading to Cloudinary...');
+    console.log('CLOUD_NAME:', CLOUD_NAME);
+    console.log('UPLOAD_PRESET:', UPLOAD_PRESET);
     const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: 'POST', body: formData });
     const data = await res.json();
+    console.log('Cloudinary full response:', data);
+    console.log('secure_url:', data.secure_url);
+    if (!data.secure_url) {
+      throw new Error('Cloudinary upload failed: ' + (data.error?.message || 'No URL returned'));
+    }
     return data.secure_url;
   };
 
+  // ✅ Fixed imageUrl: imageUrl ?? null
   const createPost = async () => {
     if (!content.trim() && !image) return;
     if (!user) return;
     setLoading(true);
     try {
-      let imageUrl = null;
+      let imageUrl: string | null = null;
       if (image) imageUrl = await uploadToCloudinary(image);
+      console.log('Final imageUrl before saving:', imageUrl);
       await addDoc(collection(db, 'posts'), {
-        userId: user.uid, username: userProfile?.username || 'anonymous',
-        fullName: userProfile?.fullName || 'User', content: content.trim(),
-        imageUrl: imageUrl ?? null, createdAt: serverTimestamp(), likes: [], reposts: [],
+        userId: user.uid,
+        username: userProfile?.username || 'anonymous',
+        fullName: userProfile?.fullName || 'User',
+        content: content.trim(),
+        imageUrl: imageUrl ?? null,
+        createdAt: serverTimestamp(),
+        likes: [],
+        reposts: [],
       });
       setContent(''); setImage(null); setImagePreview(null);
       await loadPosts();
-    } catch (err: any) { alert('Failed to post: ' + err.message); }
+    } catch (err: any) {
+      console.error('Post error:', err);
+      alert('Failed to post: ' + err.message);
+    }
     setLoading(false);
   };
 
@@ -130,7 +149,13 @@ export default function Feed() {
     if (!confirm(`Repost @${post.username}'s post?`)) return;
     setRepostingId(post.id);
     try {
-      await addDoc(collection(db, 'posts'), { userId: user.uid, username: userProfile?.username || 'anonymous', fullName: userProfile?.fullName || 'User', content: post.content, imageUrl: post.imageUrl || null, createdAt: serverTimestamp(), likes: [], reposts: [], isRepost: true, originalAuthor: post.fullName, originalUsername: post.username });
+      await addDoc(collection(db, 'posts'), {
+        userId: user.uid, username: userProfile?.username || 'anonymous',
+        fullName: userProfile?.fullName || 'User', content: post.content,
+        imageUrl: post.imageUrl ?? null, createdAt: serverTimestamp(),
+        likes: [], reposts: [], isRepost: true,
+        originalAuthor: post.fullName, originalUsername: post.username,
+      });
       await updateDoc(doc(db, 'posts', post.id), { reposts: arrayUnion(user.uid) });
       await sendNotification(post.userId, 'repost');
       await loadPosts();
@@ -275,7 +300,7 @@ export default function Feed() {
                     {isOwner && editingPost !== post.id && (
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button onClick={() => { setEditingPost(post.id); setEditContent(post.content); }}
-                          style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '2px 6px', borderRadius: 6, transition: 'color 0.2s' }}>✏️</button>
+                          style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '2px 6px', borderRadius: 6 }}>✏️</button>
                         <button onClick={() => deletePost(post.id)}
                           style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '2px 6px', borderRadius: 6 }}>🗑️</button>
                       </div>
@@ -294,31 +319,35 @@ export default function Feed() {
                   ) : (
                     <>
                       {post.content && <p style={{ fontSize: 14, color: '#d1d5db', lineHeight: 1.6, marginBottom: 12 }}>{post.content}</p>}
-                      {post.imageUrl && <img src={post.imageUrl} alt="Post" style={{ width: '100%', borderRadius: 16, maxHeight: 360, objectFit: 'cover', marginBottom: 12, border: '0.5px solid rgba(139,92,246,0.1)' }} />}
+                      {post.imageUrl && (
+                        <img
+                          src={post.imageUrl}
+                          alt="Post"
+                          style={{ width: '100%', borderRadius: 16, maxHeight: 360, objectFit: 'cover', marginBottom: 12, border: '0.5px solid rgba(139,92,246,0.1)' }}
+                          onError={(e) => { console.error('Image failed to load:', post.imageUrl); }}
+                        />
+                      )}
                     </>
                   )}
 
                   {/* Actions */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
                     <button onClick={() => toggleComments(post.id)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif', transition: 'color 0.2s' }}>
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
                       💬 <span>{(comments[post.id] || []).length || ''}</span>
                     </button>
-
                     {!isOwner && (
                       <button onClick={() => repost(post)} disabled={repostingId === post.id}
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: alreadyReposted ? '#34d399' : '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif', transition: 'color 0.2s' }}>
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: alreadyReposted ? '#34d399' : '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
                         🔄 <span>{repostCount || ''}</span>
                       </button>
                     )}
-
                     <button onClick={() => toggleLike(post)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: liked ? '#f472b6' : '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif', transition: 'color 0.2s' }}>
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: liked ? '#f472b6' : '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
                       {liked ? '❤️' : '🤍'} <span>{likeCount || ''}</span>
                     </button>
-
                     <button onClick={() => toggleBookmark(post.id)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: isBookmarked ? '#60a5fa' : '#6b7280', cursor: 'pointer', fontSize: 16, marginLeft: 'auto', transition: 'color 0.2s' }}>
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: isBookmarked ? '#60a5fa' : '#6b7280', cursor: 'pointer', fontSize: 16, marginLeft: 'auto' }}>
                       {isBookmarked ? '🔖' : '📄'}
                     </button>
                   </div>
