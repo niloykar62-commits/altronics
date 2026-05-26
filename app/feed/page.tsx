@@ -78,7 +78,7 @@ export default function Feed() {
       await addDoc(collection(db, 'posts'), {
         userId: user.uid, username: userProfile?.username || 'anonymous',
         fullName: userProfile?.fullName || 'User', content: content.trim(),
-        imageUrl, createdAt: serverTimestamp(), likes: [], reposts: [],
+        imageUrl: imageUrl ?? null, createdAt: serverTimestamp(), likes: [], reposts: [],
       });
       setContent(''); setImage(null); setImagePreview(null);
       await loadPosts();
