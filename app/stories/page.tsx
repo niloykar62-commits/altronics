@@ -6,7 +6,7 @@ import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, addDoc, getDocs, orderBy,
-  query, serverTimestamp, doc, getDoc, where,
+  query, serverTimestamp, doc, getDoc,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
 
@@ -16,7 +16,6 @@ const STORIES_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_STORIES_PRESET || 'alt
 export default function Stories() {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
-  const [stories, setStories] = useState<any[]>([]);
   const [groupedStories, setGroupedStories] = useState<any[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
   const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
@@ -37,14 +36,12 @@ export default function Stories() {
     return () => unsubscribe();
   }, []);
 
-  // Auto advance story every 5 seconds
   useEffect(() => {
     if (!selectedGroup) return;
     setProgress(0);
     const interval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 100) {
-          // Go to next story
           if (currentStoryIndex < selectedGroup.stories.length - 1) {
             setCurrentStoryIndex((i) => i + 1);
             return 0;
@@ -61,7 +58,7 @@ export default function Stories() {
 
   const loadStories = async () => {
     try {
-      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
       const allStories = snapshot.docs
@@ -71,7 +68,6 @@ export default function Stories() {
           return s.createdAt.toDate() > cutoff;
         });
 
-      // Group by userId
       const groups: { [key: string]: any } = {};
       allStories.forEach((story: any) => {
         if (!groups[story.userId]) {
@@ -85,7 +81,6 @@ export default function Stories() {
         groups[story.userId].stories.push(story);
       });
 
-      setStories(allStories);
       setGroupedStories(Object.values(groups));
     } catch (err) {
       console.error('Load stories error:', err);
@@ -100,16 +95,18 @@ export default function Stories() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('upload_preset', STORIES_PRESET);
-      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: 'POST', body: formData });
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+        { method: 'POST', body: formData }
+      );
       const data = await res.json();
-      if (!data.secure_url) throw new Error('Upload failed');
+      if (!data.secure_url) throw new Error('Upload failed: ' + (data.error?.message || 'No URL'));
 
       await addDoc(collection(db, 'stories'), {
         userId: user.uid,
         username: userProfile?.username || 'anonymous',
         fullName: userProfile?.fullName || 'User',
         mediaUrl: data.secure_url,
-        mediaType: 'image',
         createdAt: serverTimestamp(),
         views: [],
       });
@@ -117,7 +114,7 @@ export default function Stories() {
       await loadStories();
       alert('Story posted! ✨');
     } catch (err: any) {
-      alert('Failed to upload story: ' + err.message);
+      alert('Failed: ' + err.message);
     }
     setUploading(false);
   };
@@ -147,11 +144,13 @@ export default function Stories() {
   const myStories = groupedStories.find((g) => g.userId === user?.uid);
   const othersStories = groupedStories.filter((g) => g.userId !== user?.uid);
 
-  if (pageLoading) return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <p style={{ color: '#a78bfa', fontWeight: 700, fontSize: 18 }}>ALTRONICS</p>
-    </div>
-  );
+  if (pageLoading) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: '#a78bfa', fontWeight: 700, fontSize: 18 }}>ALTRONICS</p>
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
@@ -166,7 +165,11 @@ export default function Stories() {
             <div style={{ display: 'flex', gap: 4, padding: '16px 16px 8px', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 }}>
               {selectedGroup.stories.map((_: any, i: number) => (
                 <div key={i} style={{ flex: 1, height: 3, background: 'rgba(255,255,255,0.3)', borderRadius: 2, overflow: 'hidden' }}>
-                  <div style={{ height: '100%', background: 'white', borderRadius: 2, width: i < currentStoryIndex ? '100%' : i === currentStoryIndex ? `${progress}%` : '0%', transition: 'width 0.1s linear' }} />
+                  <div style={{
+                    height: '100%', background: 'white', borderRadius: 2,
+                    width: i < currentStoryIndex ? '100%' : i === currentStoryIndex ? `${progress}%` : '0%',
+                    transition: 'width 0.1s linear',
+                  }} />
                 </div>
               ))}
             </div>
@@ -183,7 +186,9 @@ export default function Stories() {
                 </div>
               </div>
               <button onClick={() => setSelectedGroup(null)}
-                style={{ background: 'none', border: 'none', color: 'white', fontSize: 24, cursor: 'pointer', padding: 4 }}>✕</button>
+                style={{ background: 'none', border: 'none', color: 'white', fontSize: 24, cursor: 'pointer', padding: 4 }}>
+                ✕
+              </button>
             </div>
 
             {/* Story image */}
@@ -193,18 +198,9 @@ export default function Stories() {
                 alt="Story"
                 style={{ width: '100%', height: '100vh', objectFit: 'contain' }}
               />
-
-              {/* Tap areas */}
               <div style={{ position: 'absolute', left: 0, top: 0, width: '40%', height: '100%', cursor: 'pointer' }} onClick={prevStory} />
               <div style={{ position: 'absolute', right: 0, top: 0, width: '40%', height: '100%', cursor: 'pointer' }} onClick={nextStory} />
             </div>
-
-            {/* Story caption */}
-            {selectedGroup.stories[currentStoryIndex]?.caption && (
-              <div style={{ position: 'absolute', bottom: 40, left: 16, right: 16, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(10px)', borderRadius: 12, padding: '10px 14px' }}>
-                <p style={{ color: 'white', fontSize: 14, margin: 0 }}>{selectedGroup.stories[currentStoryIndex].caption}</p>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -216,38 +212,37 @@ export default function Stories() {
           <h1 style={{ fontSize: 20, fontWeight: 800, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
             Stories
           </h1>
-          <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Stories disappear after 24 hours</p>
+          <p style={{ fontSize: 12, color: '#6b7280', marginTop: 4, marginBottom: 0 }}>Stories disappear after 24 hours</p>
         </div>
 
         {/* Add Your Story */}
         <div style={{ padding: '20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
-          <p style={{ fontSize: 13, fontWeight: 600, color: '#9ca3af', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 0.5 }}>Your Story</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: '#9ca3af', marginBottom: 16, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Your Story
+          </p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <label style={{ cursor: uploading ? 'not-allowed' : 'pointer' }}>
-              <div style={{ width: 64, height: 64, borderRadius: '50%', padding: 2, background: myStories ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(139,92,246,0.2)', border: myStories ? 'none' : '2px dashed rgba(139,92,246,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+              <div style={{ width: 64, height: 64, borderRadius: '50%', padding: 2, background: myStories ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(139,92,246,0.2)', border: myStories ? 'none' : '2px dashed rgba(139,92,246,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
                 {myStories ? (
-                  <img src={myStories.stories[0]?.mediaUrl} alt="Your story" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover', border: '2px solid #0a0a0f' }} />
+                  <img src={myStories.stories[0]?.mediaUrl} alt="Your story" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%', border: '2px solid #0a0a0f' }} />
                 ) : (
                   <span style={{ fontSize: 28 }}>{uploading ? '⏳' : '➕'}</span>
-                )}
-                {!uploading && (
-                  <div style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, border: '2px solid #0a0a0f' }}>+</div>
                 )}
               </div>
               <input type="file" accept="image/*" style={{ display: 'none' }} disabled={uploading}
                 onChange={(e) => { const file = e.target.files?.[0]; if (file) uploadStory(file); }} />
             </label>
-            <div>
+            <div style={{ flex: 1 }}>
               <p style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6', margin: '0 0 4px' }}>
                 {uploading ? 'Uploading...' : myStories ? 'Add more to story' : 'Add to your story'}
               </p>
               <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
-                {myStories ? `${myStories.stories.length} story posted · tap to view` : 'Share a photo with your followers'}
+                {myStories ? `${myStories.stories.length} story posted` : 'Share a photo with your followers'}
               </p>
             </div>
             {myStories && (
               <button onClick={() => openStory(myStories)}
-                style={{ marginLeft: 'auto', padding: '6px 16px', borderRadius: 20, background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                style={{ padding: '6px 16px', borderRadius: 20, background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                 View
               </button>
             )}
@@ -262,40 +257,38 @@ export default function Stories() {
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {othersStories.map((group) => (
-                <div key={group.userId}
-                  onClick={() => openStory(group)}
+                <div key={group.userId} onClick={() => openStory(group)}
                   style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', background: 'rgba(139,92,246,0.05)', border: '0.5px solid rgba(139,92,246,0.1)', borderRadius: 16, cursor: 'pointer', transition: 'all 0.2s' }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.1)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.05)')}>
-
-                  {/* Story ring */}
                   <div style={{ width: 52, height: 52, borderRadius: '50%', padding: 2, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', flexShrink: 0 }}>
-                    <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0a0a0f', border: '2px solid #0a0a0f', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0a0a0f', border: '2px solid #0a0a0f', overflow: 'hidden' }}>
                       <img src={group.stories[0]?.mediaUrl} alt={group.fullName}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        onError={(e: any) => { e.target.style.display = 'none'; }} />
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     </div>
                   </div>
-
                   <div style={{ flex: 1 }}>
                     <p style={{ fontSize: 14, fontWeight: 700, color: '#f3f4f6', margin: '0 0 2px' }}>{group.fullName}</p>
-                    <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>@{group.username} · {group.stories.length} {group.stories.length === 1 ? 'story' : 'stories'}</p>
+                    <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
+                      @{group.username} · {group.stories.length} {group.stories.length === 1 ? 'story' : 'stories'}
+                    </p>
                   </div>
-
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', flexShrink: 0 }} />
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)' }} />
                 </div>
               ))}
             </div>
           </div>
         )}
 
+        {/* Empty state */}
         {othersStories.length === 0 && !myStories && (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280' }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📸</div>
-            <p style={{ fontSize: 16, fontWeight: 600, color: '#9ca3af', marginBottom: 8 }}>No stories yet</div>
+            <p style={{ fontSize: 16, fontWeight: 600, color: '#9ca3af', marginBottom: 8 }}>No stories yet</p>
             <p style={{ fontSize: 13 }}>Be the first to share a story!</p>
           </div>
         )}
+
       </div>
     </div>
   );
