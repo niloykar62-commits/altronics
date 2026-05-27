@@ -46,7 +46,8 @@ export default function Messages() {
 
   // Load Jitsi script
   useEffect(() => {
-    if (typeof window !== 'undefined' && !window.JitsiMeetExternalAPI) {
+    // ✅ AFTER — cast to `any` to bypass TypeScript's strict type check
+      if (typeof window !== 'undefined' && !(window as any).JitsiMeetExternalAPI) {
       const script = document.createElement('script');
       script.src = 'https://meet.jit.si/external_api.js';
       script.async = true;
