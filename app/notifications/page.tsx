@@ -5,23 +5,15 @@ import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  collection, query, where, orderBy, getDocs, updateDoc, doc,
+  collection, query, where, orderBy,
+  getDocs, updateDoc, doc,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
-
-const TYPE_CONFIG: Record<string, { icon: string; bg: string; color: string; label: string }> = {
-  like:    { icon: '❤️', bg: 'rgba(244,114,182,0.12)', color: '#f472b6', label: 'liked your post' },
-  comment: { icon: '💬', bg: 'rgba(96,165,250,0.12)',  color: '#60a5fa', label: 'commented' },
-  follow:  { icon: '👤', bg: 'rgba(139,92,246,0.12)', color: '#a78bfa', label: 'started following you' },
-  repost:  { icon: '🔄', bg: 'rgba(52,211,153,0.12)', color: '#34d399', label: 'reposted your post' },
-  message: { icon: '📩', bg: 'rgba(96,165,250,0.12)', color: '#60a5fa', label: 'sent you a message' },
-};
 
 export default function Notifications() {
   const [user, setUser] = useState<any>(null);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
-  const [markingRead, setMarkingRead] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -47,22 +39,53 @@ export default function Notifications() {
   };
 
   const markAllRead = async () => {
-    setMarkingRead(true);
     try {
       const unread = notifications.filter((n) => !n.read);
       await Promise.all(unread.map((n) => updateDoc(doc(db, 'notifications', n.id), { read: true })));
       await loadNotifications(user.uid);
     } catch (err) { console.error(err); }
-    setMarkingRead(false);
   };
 
-  const formatTime = (ts: any) => {
-    if (!ts?.toDate) return 'Just now';
-    const diff = (Date.now() - ts.toDate().getTime()) / 1000;
-    if (diff < 60) return `${Math.floor(diff)}s`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h`;
-    return `${Math.floor(diff / 86400)}d`;
+  const getIcon = (type: string) => {
+    switch (type) {
+      case 'like': return '❤️';
+      case 'comment': return '💬';
+      case 'follow': return '👤';
+      case 'repost': return '🔄';
+      case 'message': return '📩';
+      case 'story_like': return '❤️';
+      case 'story_reply': return '💬';
+      case 'group_invite': return '👥';
+      default: return '🔔';
+    }
+  };
+
+  const getIconBg = (type: string) => {
+    switch (type) {
+      case 'like':
+      case 'story_like': return 'rgba(244,114,182,0.15)';
+      case 'comment':
+      case 'story_reply': return 'rgba(96,165,250,0.15)';
+      case 'follow': return 'rgba(139,92,246,0.15)';
+      case 'repost': return 'rgba(52,211,153,0.15)';
+      case 'message': return 'rgba(251,191,36,0.15)';
+      case 'group_invite': return 'rgba(139,92,246,0.15)';
+      default: return 'rgba(139,92,246,0.15)';
+    }
+  };
+
+  const getMessage = (n: any) => {
+    switch (n.type) {
+      case 'like': return 'liked your post';
+      case 'comment': return `commented: "${n.commentText}"`;
+      case 'follow': return 'started following you';
+      case 'repost': return 'reposted your post';
+      case 'message': return 'sent you a message';
+      case 'story_like': return 'liked your story ✨';
+      case 'story_reply': return `replied to your story: "${n.replyText}"`;
+      case 'group_invite': return `added you to group "${n.groupName}" 👥`;
+      default: return 'interacted with you';
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -70,92 +93,74 @@ export default function Notifications() {
   if (pageLoading) {
     return (
       <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid rgba(139,92,246,0.3)', borderTopColor: '#a78bfa', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
-          <p style={{ color: '#6b7280', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>Loading notifications...</p>
-        </div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <p style={{ color: '#a78bfa', fontWeight: 700 }}>ALTRONICS</p>
       </div>
     );
   }
 
   return (
-    <>
+    <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
       <Navbar />
-      <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif', paddingBottom: 100 }}>
-        <div style={{ maxWidth: 600, margin: '0 auto', padding: '20px 16px 0' }}>
+      <div style={{ maxWidth: 600, margin: '0 auto', paddingBottom: 100 }}>
 
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <h1 style={{ fontSize: 20, fontWeight: 700, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
-                🔔 Notifications
-              </h1>
-              {unreadCount > 0 && (
-                <span style={{ background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', color: 'white', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20 }}>
-                  {unreadCount}
-                </span>
-              )}
-            </div>
+        {/* Header */}
+        <div style={{ padding: '20px 20px 12px', borderBottom: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h1 style={{ fontSize: 20, fontWeight: 800, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
+              Notifications
+            </h1>
             {unreadCount > 0 && (
-              <button
-                onClick={markAllRead}
-                disabled={markingRead}
-                style={{ padding: '6px 14px', borderRadius: 20, background: 'rgba(139,92,246,0.1)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 12, fontWeight: 600, cursor: 'pointer', opacity: markingRead ? 0.6 : 1 }}
-              >
-                {markingRead ? 'Marking...' : 'Mark all read'}
-              </button>
+              <p style={{ fontSize: 12, color: '#6b7280', margin: '4px 0 0' }}>{unreadCount} unread</p>
             )}
           </div>
+          {unreadCount > 0 && (
+            <button onClick={markAllRead}
+              style={{ padding: '7px 16px', borderRadius: 20, background: 'rgba(139,92,246,0.1)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+              Mark all read
+            </button>
+          )}
+        </div>
 
-          {/* List */}
+        {/* Notifications list */}
+        <div>
           {notifications.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '80px 20px' }}>
+            <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280' }}>
               <p style={{ fontSize: 48, marginBottom: 12 }}>🔔</p>
-              <p style={{ color: '#6b7280', fontSize: 14 }}>No notifications yet.</p>
-              <p style={{ color: '#4b5563', fontSize: 12, marginTop: 4 }}>When someone interacts with you, it'll show up here.</p>
+              <p style={{ fontSize: 15, fontWeight: 600, color: '#9ca3af', marginBottom: 6 }}>No notifications yet</p>
+              <p style={{ fontSize: 13 }}>When someone interacts with you, it will show here.</p>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {notifications.map((n) => {
-                const cfg = TYPE_CONFIG[n.type] || { icon: '🔔', bg: 'rgba(139,92,246,0.1)', color: '#a78bfa', label: 'interacted with you' };
-                return (
-                  <div
-                    key={n.id}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px',
-                      background: n.read ? 'transparent' : 'rgba(139,92,246,0.05)',
-                      borderBottom: '0.5px solid rgba(255,255,255,0.04)',
-                      borderRadius: 0, transition: 'background 0.2s',
-                    }}
-                  >
-                    {/* Icon bubble */}
-                    <div style={{ width: 42, height: 42, borderRadius: '50%', background: cfg.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
-                      {cfg.icon}
-                    </div>
+            notifications.map((n) => (
+              <div key={n.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', background: !n.read ? 'rgba(139,92,246,0.04)' : 'transparent', transition: 'background 0.2s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.07)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = !n.read ? 'rgba(139,92,246,0.04)' : 'transparent')}>
 
-                    {/* Text */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 13, color: '#d1d5db', lineHeight: 1.5, margin: 0 }}>
-                        <span style={{ fontWeight: 600, color: '#f3f4f6' }}>@{n.fromUsername}</span>{' '}
-                        {n.type === 'comment' && n.commentText
-                          ? `commented: "${n.commentText}"`
-                          : cfg.label}
-                      </p>
-                      <p style={{ fontSize: 11, color: '#4b5563', marginTop: 2 }}>{formatTime(n.createdAt)}</p>
-                    </div>
+                {/* Icon */}
+                <div style={{ width: 44, height: 44, borderRadius: '50%', background: getIconBg(n.type), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
+                  {getIcon(n.type)}
+                </div>
 
-                    {/* Unread dot */}
-                    {!n.read && (
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', flexShrink: 0 }} />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                {/* Text */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, color: '#d1d5db', margin: 0, lineHeight: 1.5 }}>
+                    <span style={{ fontWeight: 700, color: '#f3f4f6' }}>@{n.fromUsername}</span>{' '}
+                    {getMessage(n)}
+                  </p>
+                  <p style={{ fontSize: 11, color: '#4b5563', margin: '4px 0 0' }}>
+                    {n.createdAt?.toDate ? new Date(n.createdAt.toDate()).toLocaleString() : 'Just now'}
+                  </p>
+                </div>
+
+                {/* Unread dot */}
+                {!n.read && (
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', flexShrink: 0 }} />
+                )}
+              </div>
+            ))
           )}
         </div>
       </div>
-    </>
+    </div>
   );
 }
