@@ -38,6 +38,10 @@ export default function Messages() {
   const [editingGroupName, setEditingGroupName] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [addMemberSearch, setAddMemberSearch] = useState('');
+  const [replyingTo, setReplyingTo] = useState<any>(null);       // message being replied to
+  const [mentionQuery, setMentionQuery] = useState('');           // text after # in input
+  const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]); // users shown in dropdown
+  const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -258,13 +262,38 @@ export default function Messages() {
     if (!newMessage.trim() || !user || !selectedChat) return;
     const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
     try {
+      // Extract mentioned usernames (#username)
+      const mentionedUsernames = [...new Set((newMessage.match(/#([a-zA-Z0-9_]+)/g) || []).map((m: string) => m.slice(1)))];
+
       await addDoc(collection(db, collectionName, selectedChat.id, 'messages'), {
         senderId: user.uid,
         senderUsername: userProfile?.username || 'me',
         senderFullName: userProfile?.fullName || 'User',
         content: newMessage.trim(),
         createdAt: serverTimestamp(),
+        ...(replyingTo ? {
+          replyTo: {
+            id: replyingTo.id,
+            content: replyingTo.content,
+            senderUsername: replyingTo.senderUsername,
+            senderFullName: replyingTo.senderFullName,
+          }
+        } : {}),
+        ...(mentionedUsernames.length > 0 ? { mentions: mentionedUsernames } : {}),
       });
+
+      // Send mention notifications
+      for (const uname of mentionedUsernames) {
+        const mentionedUser = allUsers.find((u: any) => u.username === uname);
+        if (mentionedUser) {
+          await addDoc(collection(db, 'notifications'), {
+            toUserId: mentionedUser.id, fromUserId: user.uid,
+            fromUsername: userProfile?.username || 'someone',
+            type: 'mention', read: false, createdAt: serverTimestamp(),
+            preview: newMessage.trim().slice(0, 80),
+          });
+        }
+      }
       if (selectedChat.type === 'dm') {
         await addDoc(collection(db, 'notifications'), {
           toUserId: selectedChat.otherUser.id, fromUserId: user.uid,
@@ -273,6 +302,7 @@ export default function Messages() {
         });
       }
       setNewMessage('');
+      setReplyingTo(null);
       await loadMessages(collectionName, selectedChat.id);
       if (selectedChat.type === 'dm') await markMessagesAsSeen(collectionName, selectedChat.id);
     } catch (err) { console.error(err); }
@@ -386,6 +416,60 @@ export default function Messages() {
     u.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.fullName?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Render text — highlight #mentions in purple
+  const renderContent = (text: string) => {
+    const parts = text.split(/(#[a-zA-Z0-9_]+)/g);
+    return parts.map((part, i) =>
+      part.startsWith('#')
+        ? <span key={i} style={{ color: '#a78bfa', fontWeight: 700 }}>{part}</span>
+        : <span key={i}>{part}</span>
+    );
+  };
+
+  // Handle input changes — detect # for mention autocomplete
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setNewMessage(val);
+    // Find last # in string
+    const cursor = e.target.selectionStart || val.length;
+    const textUpToCursor = val.slice(0, cursor);
+    const hashIdx = textUpToCursor.lastIndexOf('#');
+    if (hashIdx !== -1 && (hashIdx === 0 || textUpToCursor[hashIdx - 1] === ' ')) {
+      const query = textUpToCursor.slice(hashIdx + 1);
+      if (!query.includes(' ')) {
+        setMentionQuery(query);
+        const chatMembers = selectedChat?.type === 'group'
+          ? (groupInfo?.memberProfiles || allUsers)
+          : (selectedChat?.otherUser ? [selectedChat.otherUser] : allUsers);
+        const all = allUsers;  // always search all users for mentions
+        setMentionSuggestions(
+          all.filter((u: any) =>
+            u.username?.toLowerCase().startsWith(query.toLowerCase()) ||
+            u.fullName?.toLowerCase().startsWith(query.toLowerCase())
+          ).slice(0, 5)
+        );
+        return;
+      }
+    }
+    setMentionQuery('');
+    setMentionSuggestions([]);
+  };
+
+  // Insert mention into input
+  const insertMention = (username: string) => {
+    const val = newMessage;
+    const cursor = inputRef.current?.selectionStart || val.length;
+    const textUpToCursor = val.slice(0, cursor);
+    const hashIdx = textUpToCursor.lastIndexOf('#');
+    const before = val.slice(0, hashIdx);
+    const after = val.slice(cursor);
+    const newVal = before + '#' + username + ' ' + after;
+    setNewMessage(newVal);
+    setMentionSuggestions([]);
+    setMentionQuery('');
+    setTimeout(() => { inputRef.current?.focus(); }, 0);
+  };
 
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '10px 14px',
@@ -802,24 +886,56 @@ export default function Messages() {
                       );
                     }
                     return (
-                      <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
+                      <div key={msg.id}
+                        style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', position: 'relative' }}
+                        onMouseEnter={(e) => { const btn = e.currentTarget.querySelector('.reply-btn') as HTMLElement; if (btn) btn.style.opacity = '1'; }}
+                        onMouseLeave={(e) => { const btn = e.currentTarget.querySelector('.reply-btn') as HTMLElement; if (btn) btn.style.opacity = '0'; }}
+                      >
+                        {/* Sender name in group */}
                         {!isMe && selectedChat.type === 'group' && (
                           <span style={{ fontSize: 10, color: '#a78bfa', fontWeight: 600, marginBottom: 3, marginLeft: 4 }}>
-                            @{msg.senderUsername}
+                            #{msg.senderUsername}
                           </span>
                         )}
-                        <div style={{ maxWidth: '70%', padding: '10px 14px', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px', background: isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)', border: isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)' }}>
-                          <p style={{ fontSize: 13, color: 'white', margin: 0, lineHeight: 1.5 }}>{msg.content}</p>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
-                            <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
-                              {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                            </span>
-                            {isMe && selectedChat.type === 'dm' && (
-                              <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
-                                title={(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? 'Seen' : 'Sent'}>
-                                {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
-                              </span>
+
+                        {/* Reply button — hover/tap */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isMe ? 'row-reverse' : 'row' }}>
+                          <button
+                            className="reply-btn"
+                            onClick={() => setReplyingTo(msg)}
+                            style={{ opacity: 0, transition: 'opacity 0.15s', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#a78bfa', fontSize: 13, flexShrink: 0 }}
+                            title="Reply">
+                            ↩
+                          </button>
+
+                          <div style={{ maxWidth: '72%' }}>
+                            {/* Reply preview inside bubble */}
+                            {msg.replyTo && (
+                              <div style={{ marginBottom: 4, padding: '6px 10px', borderRadius: '10px 10px 0 0', background: isMe ? 'rgba(0,0,0,0.25)' : 'rgba(139,92,246,0.12)', borderLeft: '3px solid #a78bfa' }}>
+                                <p style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', margin: '0 0 2px' }}>
+                                  ↩ #{msg.replyTo.senderUsername}
+                                </p>
+                                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
+                                  {msg.replyTo.content}
+                                </p>
+                              </div>
                             )}
+
+                            {/* Main bubble */}
+                            <div style={{ padding: '10px 14px', borderRadius: msg.replyTo ? (isMe ? '0 18px 4px 18px' : '18px 0 18px 4px') : (isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px'), background: isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)', border: isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)' }}>
+                              <p style={{ fontSize: 13, color: 'white', margin: 0, lineHeight: 1.6 }}>{renderContent(msg.content)}</p>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
+                                <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
+                                  {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                </span>
+                                {isMe && selectedChat.type === 'dm' && (
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
+                                    title={(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? 'Seen' : 'Sent'}>
+                                    {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -828,19 +944,82 @@ export default function Messages() {
                   <div ref={messagesEndRef} />
                 </div>
 
-                {/* Message input */}
-                <div style={{ padding: '12px 20px 20px', borderTop: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <input
-                    placeholder={`Message ${selectedChat.name}...`}
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') sendMessage(); }}
-                    style={{ ...inputStyle, flex: 1, borderRadius: 24, padding: '10px 16px' }}
-                  />
-                  <button onClick={sendMessage} disabled={!newMessage.trim()}
-                    style={{ padding: '10px 20px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: newMessage.trim() ? 'pointer' : 'not-allowed', opacity: newMessage.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif' }}>
-                    Send
-                  </button>
+                {/* Message input area */}
+                <div style={{ borderTop: '0.5px solid rgba(139,92,246,0.15)', background: '#0a0a0f' }}>
+
+                  {/* Reply preview bar */}
+                  {replyingTo && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: 'rgba(139,92,246,0.08)', borderBottom: '0.5px solid rgba(139,92,246,0.15)' }}>
+                      <div style={{ flex: 1, borderLeft: '3px solid #a78bfa', paddingLeft: 10 }}>
+                        <p style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', margin: '0 0 2px' }}>
+                          ↩ Replying to #{replyingTo.senderUsername}
+                        </p>
+                        <p style={{ fontSize: 12, color: '#9ca3af', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>
+                          {replyingTo.content}
+                        </p>
+                      </div>
+                      <button onClick={() => setReplyingTo(null)}
+                        style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>✕</button>
+                    </div>
+                  )}
+
+                  {/* Mention suggestions dropdown */}
+                  {mentionSuggestions.length > 0 && (
+                    <div style={{ background: '#111118', border: '0.5px solid rgba(139,92,246,0.25)', borderRadius: 14, margin: '0 12px 6px', overflow: 'hidden' }}>
+                      {mentionSuggestions.map((u: any) => (
+                        <div key={u.id}
+                          onClick={() => insertMention(u.username)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', cursor: 'pointer', borderBottom: '0.5px solid rgba(255,255,255,0.04)', transition: 'background 0.15s' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.1)')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                          <div style={{ position: 'relative', flexShrink: 0 }}>
+                            <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12, color: '#a78bfa' }}>
+                              {u.fullName?.[0]?.toUpperCase() || 'U'}
+                            </div>
+                            {onlineUsers[u.id] && (
+                              <div style={{ position: 'absolute', bottom: 0, right: 0, width: 9, height: 9, borderRadius: '50%', background: '#22c55e', border: '2px solid #111118' }} />
+                            )}
+                          </div>
+                          <div>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>{u.fullName}</p>
+                            <p style={{ fontSize: 11, color: '#a78bfa', margin: 0 }}>#{u.username}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Input row */}
+                  <div style={{ padding: '10px 12px 20px', display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {/* # mention trigger button */}
+                    <button
+                      onClick={() => {
+                        const val = newMessage;
+                        const needsSpace = val.length > 0 && !val.endsWith(' ');
+                        const toInsert = (needsSpace ? ' #' : '#');
+                        setNewMessage(val + toInsert);
+                        setTimeout(() => inputRef.current?.focus(), 0);
+                      }}
+                      style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 15, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                      title="Mention someone">
+                      #
+                    </button>
+                    <input
+                      ref={inputRef}
+                      placeholder={replyingTo ? `Reply to #${replyingTo.senderUsername}...` : `Message ${selectedChat.name}...`}
+                      value={newMessage}
+                      onChange={handleInputChange}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') { setReplyingTo(null); setMentionSuggestions([]); }
+                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+                      }}
+                      style={{ ...inputStyle, flex: 1, borderRadius: 24, padding: '10px 16px' }}
+                    />
+                    <button onClick={sendMessage} disabled={!newMessage.trim()}
+                      style={{ padding: '10px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: newMessage.trim() ? 'pointer' : 'not-allowed', opacity: newMessage.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
+                      Send
+                    </button>
+                  </div>
                 </div>
               </>
             ) : (
