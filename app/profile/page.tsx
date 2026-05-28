@@ -38,6 +38,11 @@ export default function Profile() {
   const [activeStatus, setActiveStatus] = useState(true);
   const [togglingPrivacy, setTogglingPrivacy] = useState(false);
 
+  // ── Followers / Following modal ──────────────────────────────────────────
+  const [showModal, setShowModal] = useState<'followers' | 'following' | null>(null);
+  const [modalUsers, setModalUsers] = useState<any[]>([]);
+  const [modalLoading, setModalLoading] = useState(false);
+
   const router = useRouter();
 
   useEffect(() => {
@@ -127,6 +132,25 @@ export default function Profile() {
     setTogglingPrivacy(false);
   };
 
+  // ── Open followers/following modal ──────────────────────────────────────
+  const openModal = async (type: 'followers' | 'following') => {
+    setShowModal(type);
+    setModalLoading(true);
+    setModalUsers([]);
+    try {
+      const ids: string[] = profile?.[type] || [];
+      if (ids.length === 0) { setModalLoading(false); return; }
+      const profiles = await Promise.all(
+        ids.map(async (uid: string) => {
+          const d = await getDoc(doc(db, 'users', uid));
+          return d.exists() ? { id: d.id, ...d.data() } : null;
+        })
+      );
+      setModalUsers(profiles.filter(Boolean));
+    } catch (err) { console.error(err); }
+    setModalLoading(false);
+  };
+
   const inputStyle = {
     width: '100%', padding: '10px 14px',
     background: 'rgba(139,92,246,0.08)',
@@ -212,16 +236,21 @@ export default function Profile() {
 
               {/* Stats */}
               <div style={{ display: 'flex', gap: 24, flex: 1, justifyContent: 'space-around' }}>
-                {[
-                  { num: posts.length, label: 'Posts' },
-                  { num: profile?.followers?.length || 0, label: 'Followers' },
-                  { num: profile?.following?.length || 0, label: 'Following' },
-                ].map(({ num, label }) => (
-                  <div key={label} style={{ textAlign: 'center' }}>
-                    <p style={{ fontSize: 20, fontWeight: 700, color: '#f3f4f6', marginBottom: 2 }}>{num}</p>
-                    <p style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</p>
-                  </div>
-                ))}
+                {/* Posts — not clickable */}
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ fontSize: 20, fontWeight: 700, color: '#f3f4f6', marginBottom: 2 }}>{posts.length}</p>
+                  <p style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>Posts</p>
+                </div>
+                {/* Followers — clickable */}
+                <div style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openModal('followers')}>
+                  <p style={{ fontSize: 20, fontWeight: 700, color: '#f3f4f6', marginBottom: 2 }}>{profile?.followers?.length || 0}</p>
+                  <p style={{ fontSize: 10, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Followers</p>
+                </div>
+                {/* Following — clickable */}
+                <div style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openModal('following')}>
+                  <p style={{ fontSize: 20, fontWeight: 700, color: '#f3f4f6', marginBottom: 2 }}>{profile?.following?.length || 0}</p>
+                  <p style={{ fontSize: 10, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Following</p>
+                </div>
               </div>
             </div>
 
@@ -345,6 +374,64 @@ export default function Profile() {
           )}
         </div>
       </div>
+
+      {/* ── Followers / Following Modal ─────────────────────────────────── */}
+      {showModal && (
+        <div
+          onClick={() => setShowModal(null)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 480, background: '#111118', borderRadius: '24px 24px 0 0', border: '0.5px solid rgba(139,92,246,0.25)', maxHeight: '75vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            {/* Modal header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.06)' }}>
+              <h2 style={{ fontSize: 15, fontWeight: 800, color: '#f3f4f6', margin: 0, textTransform: 'capitalize' }}>
+                {showModal === 'followers' ? '👥 Followers' : '➡️ Following'}
+              </h2>
+              <button onClick={() => setShowModal(null)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+            </div>
+            {/* Modal body */}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {modalLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', border: '2px solid rgba(139,92,246,0.3)', borderTopColor: '#a78bfa', animation: 'spin 0.8s linear infinite' }} />
+                </div>
+              ) : modalUsers.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '48px 20px', color: '#6b7280' }}>
+                  <p style={{ fontSize: 32, marginBottom: 8 }}>👤</p>
+                  <p style={{ fontSize: 14 }}>No {showModal} yet</p>
+                </div>
+              ) : (
+                modalUsers.map((u: any) => (
+                  <div
+                    key={u.id}
+                    onClick={() => { setShowModal(null); router.push(`/profile/${u.id}`); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', cursor: 'pointer', borderBottom: '0.5px solid rgba(255,255,255,0.04)', transition: 'background 0.15s' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.07)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
+                    {/* Avatar */}
+                    <div style={{ width: 46, height: 46, borderRadius: '50%', overflow: 'hidden', border: '1.5px solid rgba(139,92,246,0.35)', flexShrink: 0 }}>
+                      {u.photoURL ? (
+                        <img src={u.photoURL} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, fontWeight: 700, color: 'white' }}>
+                          {u.fullName?.[0]?.toUpperCase() || 'U'}
+                        </div>
+                      )}
+                    </div>
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: '#f3f4f6', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.fullName}</p>
+                      <p style={{ fontSize: 12, color: '#a78bfa', margin: 0 }}>@{u.username}</p>
+                    </div>
+                    <span style={{ color: '#4b5563', fontSize: 18 }}>›</span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
