@@ -262,7 +262,7 @@ export default function Profile() {
                   </div>
                   <div>
                     <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 2 }}>Message Seen</p>
-                    <p style={{ fontSize: 11, color: '#6b7280' }}>{messageSeen ? 'Others can see when you've read their messages' : 'Read receipts are hidden'}</p>
+                    <p style={{ fontSize: 11, color: '#6b7280' }}>{messageSeen ? "Others can see when you've read their messages" : 'Read receipts are hidden'}</p>
                   </div>
                 </div>
                 <Toggle
@@ -281,7 +281,7 @@ export default function Profile() {
                   </div>
                   <div>
                     <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 2 }}>Active Status</p>
-                    <p style={{ fontSize: 11, color: '#6b7280' }}>{activeStatus ? 'Others can see when you're online' : 'You appear offline to everyone'}</p>
+                    <p style={{ fontSize: 11, color: '#6b7280' }}>{activeStatus ? "Others can see when you're online" : 'You appear offline to everyone'}</p>
                   </div>
                 </div>
                 <Toggle
