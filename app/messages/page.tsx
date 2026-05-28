@@ -863,7 +863,7 @@ export default function Messages() {
                                       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
                                         <button onClick={() => toggleAdmin(member.id)}
                                           title={isMemberAdmin ? 'Remove admin' : 'Make admin'}
-                                          style={{ padding: '5px 10px', borderRadius: 8, background: isMemberAdmin ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.06)', border: '0.5px solid ' + (isMemberAdmin ? 'rgba(139,92,246,0.4)' : 'rgba(255,255,255,0.1)'), color: isMemberAdmin ? '#a78bfa' : '#9ca3af', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                                          style={{ padding: '5px 10px', borderRadius: 8, background: isMemberAdmin ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.06)', border: isMemberAdmin ? '0.5px solid rgba(139,92,246,0.4)' : '0.5px solid rgba(255,255,255,0.1)', color: isMemberAdmin ? '#a78bfa' : '#9ca3af', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                                           {isMemberAdmin ? '★ Admin' : '☆ Admin'}
                                         </button>
                                         <button onClick={() => removeMember(member.id)}
@@ -1016,7 +1016,7 @@ export default function Messages() {
                                     return (
                                       <button key={emoji}
                                         onClick={() => toggleReaction(msg.id, emoji, collName)}
-                                        style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', borderRadius: 20, background: iReacted ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.06)', border: '0.5px solid ' + (iReacted ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.1)'), cursor: 'pointer', transition: 'all 0.15s' }}>
+                                        style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', borderRadius: 20, background: iReacted ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.06)', border: iReacted ? '0.5px solid rgba(139,92,246,0.5)' : '0.5px solid rgba(255,255,255,0.1)', cursor: 'pointer', transition: 'all 0.15s' }}>
                                         <span style={{ fontSize: 14 }}>{emoji}</span>
                                         <span style={{ fontSize: 11, fontWeight: 700, color: iReacted ? '#a78bfa' : '#9ca3af' }}>{uids.length}</span>
                                       </button>
@@ -1039,7 +1039,6 @@ export default function Messages() {
                                 ))}
                               </div>
                             )}
-                        </div>
                       </div>
                     );
                   })}
