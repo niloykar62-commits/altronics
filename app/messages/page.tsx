@@ -57,9 +57,13 @@ export default function Messages() {
   const editInputRef = useRef<HTMLInputElement>(null);
 
   // ── Close msg context menu on outside click ───────────────────────────────
+  const msgMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!msgMenuOpenId) return;
-    const handler = () => setMsgMenuOpenId(null);
+    const handler = (e: MouseEvent) => {
+      if (msgMenuRef.current && msgMenuRef.current.contains(e.target as Node)) return;
+      setMsgMenuOpenId(null);
+    };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [msgMenuOpenId]);
@@ -1023,7 +1027,8 @@ export default function Messages() {
                                 {msgMenuOpenId === msg.id && (
                                   <div
                                     style={{ position: 'absolute', [isMe ? 'right' : 'left']: 0, bottom: '110%', zIndex: 200, background: '#111118', border: '0.5px solid rgba(139,92,246,0.25)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 16px 40px rgba(0,0,0,0.55)', minWidth: 140, animation: 'menuPop 0.15s cubic-bezier(0.34,1.56,0.64,1)' }}
-                                    onClick={(e) => e.stopPropagation()}
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                    ref={msgMenuRef}
                                   >
                                     <style>{`@keyframes menuPop { from { opacity:0; transform:scale(0.85) translateY(6px); } to { opacity:1; transform:scale(1) translateY(0); } }`}</style>
                                     {/* Edit */}
