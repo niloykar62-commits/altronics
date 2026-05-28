@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { auth, db } from '@/lib/firebase';
@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
 
-export default function Messages() {
+function MessagesContent() {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -1179,5 +1179,17 @@ export default function Messages() {
         )}
       </nav>
     </div>
+  );
+}
+
+export default function Messages() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: '#a78bfa', fontWeight: 700 }}>ALTRONICS</p>
+      </div>
+    }>
+      <MessagesContent />
+    </Suspense>
   );
 }
