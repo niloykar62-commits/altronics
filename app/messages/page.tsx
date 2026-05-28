@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, storage } from '@/lib/firebase';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, addDoc, getDocs, orderBy,
@@ -55,6 +56,12 @@ export default function Messages() {
   const [editingContent, setEditingContent] = useState('');
   const [msgMenuOpenId, setMsgMenuOpenId] = useState<string | null>(null);
   const editInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Image upload state ────────────────────────────────────────────────────
+  const [imageUploadProgress, setImageUploadProgress] = useState<number | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
 
   // ── Close msg context menu on outside click ───────────────────────────────
   const msgMenuRef = useRef<HTMLDivElement>(null);
@@ -541,6 +548,71 @@ export default function Messages() {
   };
 
   const cancelEdit = () => { setEditingMsgId(null); setEditingContent(''); };
+
+  // ── Image upload helpers ──────────────────────────────────────────────────
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
+    if (file.size > 10 * 1024 * 1024) { alert('Image must be under 10 MB.'); return; }
+    setPendingImageFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+    // reset input so same file can be re-selected
+    e.target.value = '';
+  };
+
+  const cancelImagePreview = () => {
+    setPendingImageFile(null);
+    setImagePreview(null);
+    setImageUploadProgress(null);
+  };
+
+  const sendImage = async () => {
+    if (!pendingImageFile || !user || !selectedChat) return;
+    const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
+    const path = `chat-images/${selectedChat.id}/${Date.now()}_${pendingImageFile.name}`;
+    const fileRef = storageRef(storage, path);
+    const uploadTask = uploadBytesResumable(fileRef, pendingImageFile);
+
+    setImageUploadProgress(0);
+
+    uploadTask.on(
+      'state_changed',
+      (snapshot) => {
+        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
+        setImageUploadProgress(pct);
+      },
+      (err) => {
+        console.error(err);
+        alert('Upload failed: ' + err.message);
+        setImageUploadProgress(null);
+      },
+      async () => {
+        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+        await addDoc(collection(db, collectionName, selectedChat.id, 'messages'), {
+          senderId: user.uid,
+          senderUsername: userProfile?.username || 'me',
+          senderFullName: userProfile?.fullName || 'User',
+          content: newMessage.trim() || '',
+          imageUrl: downloadURL,
+          createdAt: serverTimestamp(),
+        });
+        if (selectedChat.type === 'dm') {
+          await addDoc(collection(db, 'notifications'), {
+            toUserId: selectedChat.otherUser.id, fromUserId: user.uid,
+            fromUsername: userProfile?.username || 'someone',
+            type: 'message', read: false, createdAt: serverTimestamp(),
+          });
+        }
+        cancelImagePreview();
+        setNewMessage('');
+        await loadMessages(collectionName, selectedChat.id);
+        if (selectedChat.type === 'dm') await markMessagesAsSeen(collectionName, selectedChat.id);
+      }
+    );
+  };
 
   // ── Delete a message ──────────────────────────────────────────────────────
   const deleteMessage = async (msg: any) => {
@@ -1090,18 +1162,31 @@ export default function Messages() {
                                 <p style={{ fontSize: 10, color: '#6b7280', margin: 0, textAlign: 'right' }}>Enter to save · Esc to cancel</p>
                               </div>
                             ) : (
-                              <div style={{ padding: '10px 14px', borderRadius: msg.replyTo ? (isMe ? '0 18px 4px 18px' : '18px 0 18px 4px') : (isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px'), background: msg.deleted ? 'rgba(255,255,255,0.03)' : (isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)'), border: msg.deleted ? '0.5px solid rgba(255,255,255,0.06)' : (isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)') }}>
+                              <div style={{ padding: msg.imageUrl ? '6px 6px 10px 6px' : '10px 14px', borderRadius: msg.replyTo ? (isMe ? '0 18px 4px 18px' : '18px 0 18px 4px') : (isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px'), background: msg.deleted ? 'rgba(255,255,255,0.03)' : (isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)'), border: msg.deleted ? '0.5px solid rgba(255,255,255,0.06)' : (isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)'), overflow: 'hidden' }}>
                                 {msg.deleted ? (
                                   <p style={{ fontSize: 12, color: '#4b5563', fontStyle: 'italic', margin: 0 }}>🗑 Message deleted</p>
                                 ) : (
                                   <>
-                                    <p style={{ fontSize: 13, color: 'white', margin: 0, lineHeight: 1.6 }}>{renderContent(msg.content)}</p>
+                                    {/* Image */}
+                                    {msg.imageUrl && (
+                                      <a href={msg.imageUrl} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: msg.content ? 8 : 0 }}>
+                                        <img
+                                          src={msg.imageUrl}
+                                          alt="shared image"
+                                          style={{ display: 'block', maxWidth: '100%', width: 260, maxHeight: 320, objectFit: 'cover', borderRadius: 14, cursor: 'zoom-in' }}
+                                        />
+                                      </a>
+                                    )}
+                                    {/* Caption text */}
+                                    {msg.content && (
+                                      <p style={{ fontSize: 13, color: 'white', margin: msg.imageUrl ? '0 6px' : 0, lineHeight: 1.6 }}>{renderContent(msg.content)}</p>
+                                    )}
                                     {msg.editedAt && (
                                       <span style={{ fontSize: 9, color: isMe ? 'rgba(255,255,255,0.45)' : '#4b5563', fontStyle: 'italic' }}> · edited</span>
                                     )}
                                   </>
                                 )}
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4, padding: msg.imageUrl ? '0 6px' : 0 }}>
                                   <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
                                     {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                   </span>
@@ -1176,8 +1261,42 @@ export default function Messages() {
                     </div>
                   )}
 
+                  {/* Image preview bar */}
+                  {imagePreview && (
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, padding: '10px 16px', background: 'rgba(139,92,246,0.06)', borderBottom: '0.5px solid rgba(139,92,246,0.15)' }}>
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <img src={imagePreview} alt="preview" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 12, border: '1.5px solid rgba(139,92,246,0.4)' }} />
+                        {imageUploadProgress !== null && imageUploadProgress < 100 && (
+                          <div style={{ position: 'absolute', inset: 0, borderRadius: 12, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: '#a78bfa' }}>{imageUploadProgress}%</span>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: 11, color: '#a78bfa', fontWeight: 600, margin: '0 0 4px' }}>
+                          {pendingImageFile?.name}
+                        </p>
+                        <p style={{ fontSize: 10, color: '#6b7280', margin: 0 }}>
+                          {pendingImageFile ? (pendingImageFile.size / 1024 < 1000
+                            ? `${(pendingImageFile.size / 1024).toFixed(1)} KB`
+                            : `${(pendingImageFile.size / (1024 * 1024)).toFixed(1)} MB`) : ''}
+                        </p>
+                      </div>
+                      <button onClick={cancelImagePreview} disabled={imageUploadProgress !== null && imageUploadProgress < 100}
+                        style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer', lineHeight: 1, flexShrink: 0, opacity: imageUploadProgress !== null && imageUploadProgress < 100 ? 0.4 : 1 }}>✕</button>
+                    </div>
+                  )}
+
                   {/* Input row */}
                   <div style={{ padding: '10px 12px 20px', display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
+                    {/* Hidden file input */}
+                    <input
+                      ref={imageInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageSelect}
+                      style={{ display: 'none' }}
+                    />
                     {/* Emoji picker for input */}
                     {showEmojiPicker && (
                       <EmojiPicker
@@ -1197,6 +1316,14 @@ export default function Messages() {
                       title="Emoji">
                       😊
                     </button>
+                    {/* Image upload button */}
+                    <button
+                      onClick={() => imageInputRef.current?.click()}
+                      disabled={imageUploadProgress !== null && imageUploadProgress < 100}
+                      style={{ width: 36, height: 36, borderRadius: '50%', background: imagePreview ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.3)', fontSize: 17, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.15s', opacity: imageUploadProgress !== null && imageUploadProgress < 100 ? 0.5 : 1 }}
+                      title="Send image">
+                      🖼️
+                    </button>
                     {/* # mention trigger button */}
                     <button
                       onClick={() => {
@@ -1212,19 +1339,32 @@ export default function Messages() {
                     </button>
                     <input
                       ref={inputRef}
-                      placeholder={replyingTo ? `Reply to #${replyingTo.senderUsername}...` : `Message ${selectedChat.name}...`}
+                      placeholder={imagePreview ? 'Add a caption (optional)...' : (replyingTo ? `Reply to #${replyingTo.senderUsername}...` : `Message ${selectedChat.name}...`)}
                       value={newMessage}
                       onChange={handleInputChange}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') { setReplyingTo(null); setMentionSuggestions([]); }
-                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          if (pendingImageFile) sendImage();
+                          else sendMessage();
+                        }
                       }}
                       style={{ ...inputStyle, flex: 1, borderRadius: 24, padding: '10px 16px' }}
                     />
-                    <button onClick={sendMessage} disabled={!newMessage.trim()}
-                      style={{ padding: '10px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: newMessage.trim() ? 'pointer' : 'not-allowed', opacity: newMessage.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
-                      Send
-                    </button>
+                    {pendingImageFile ? (
+                      <button
+                        onClick={sendImage}
+                        disabled={imageUploadProgress !== null && imageUploadProgress < 100}
+                        style={{ padding: '10px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif', flexShrink: 0, opacity: imageUploadProgress !== null && imageUploadProgress < 100 ? 0.6 : 1 }}>
+                        {imageUploadProgress !== null && imageUploadProgress < 100 ? `${imageUploadProgress}%` : 'Send 🖼️'}
+                      </button>
+                    ) : (
+                      <button onClick={sendMessage} disabled={!newMessage.trim()}
+                        style={{ padding: '10px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: newMessage.trim() ? 'pointer' : 'not-allowed', opacity: newMessage.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
+                        Send
+                      </button>
+                    )}
                   </div>
                 </div>
               </>
