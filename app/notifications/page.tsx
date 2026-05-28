@@ -46,6 +46,63 @@ export default function Notifications() {
     } catch (err) { console.error(err); }
   };
 
+  const markOneRead = async (id: string) => {
+    try {
+      await updateDoc(doc(db, 'notifications', id), { read: true });
+    } catch (err) { console.error(err); }
+  };
+
+  // Route to the right page based on notification type
+  const handleClick = async (n: any) => {
+    if (!n.read) await markOneRead(n.id);
+    // Update local state immediately so dot disappears
+    setNotifications((prev) => prev.map((x) => x.id === n.id ? { ...x, read: true } : x));
+
+    switch (n.type) {
+      // Direct message → /messages?dm=<fromUserId>
+      case 'message':
+        router.push(`/messages?dm=${n.fromUserId}`);
+        break;
+
+      // Group invite → /messages?group=<groupId>
+      case 'group_invite':
+        if (n.groupId) router.push(`/messages?group=${n.groupId}`);
+        else router.push('/messages');
+        break;
+
+      // Mention in a message → open that DM/group
+      case 'mention':
+        if (n.groupId) router.push(`/messages?group=${n.groupId}`);
+        else if (n.fromUserId) router.push(`/messages?dm=${n.fromUserId}`);
+        else router.push('/messages');
+        break;
+
+      // Like / comment / repost on a post → /post/<postId>
+      case 'like':
+      case 'comment':
+      case 'repost':
+        if (n.postId) router.push(`/post/${n.postId}`);
+        else router.push('/feed');
+        break;
+
+      // Story like / reply → /stories (or specific user story)
+      case 'story_like':
+      case 'story_reply':
+        if (n.storyUserId) router.push(`/stories?user=${n.storyUserId}`);
+        else router.push('/stories');
+        break;
+
+      // Follow → that user's profile
+      case 'follow':
+        if (n.fromUserId) router.push(`/profile/${n.fromUserId}`);
+        else router.push('/profile');
+        break;
+
+      default:
+        router.push('/feed');
+    }
+  };
+
   const getIcon = (type: string) => {
     switch (type) {
       case 'like': return '❤️';
@@ -56,6 +113,7 @@ export default function Notifications() {
       case 'story_like': return '❤️';
       case 'story_reply': return '💬';
       case 'group_invite': return '👥';
+      case 'mention': return '💜';
       default: return '🔔';
     }
   };
@@ -70,6 +128,7 @@ export default function Notifications() {
       case 'repost': return 'rgba(52,211,153,0.15)';
       case 'message': return 'rgba(251,191,36,0.15)';
       case 'group_invite': return 'rgba(139,92,246,0.15)';
+      case 'mention': return 'rgba(167,139,250,0.15)';
       default: return 'rgba(139,92,246,0.15)';
     }
   };
@@ -84,6 +143,7 @@ export default function Notifications() {
       case 'story_like': return 'liked your story ✨';
       case 'story_reply': return `replied to your story: "${n.replyText}"`;
       case 'group_invite': return `added you to group "${n.groupName}" 👥`;
+      case 'mention': return `mentioned you in a message`;
       default: return 'interacted with you';
     }
   };
@@ -132,9 +192,10 @@ export default function Notifications() {
           ) : (
             notifications.map((n) => (
               <div key={n.id}
-                style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', background: !n.read ? 'rgba(139,92,246,0.04)' : 'transparent', transition: 'background 0.2s' }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.07)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = !n.read ? 'rgba(139,92,246,0.04)' : 'transparent')}>
+                onClick={() => handleClick(n)}
+                style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', background: !n.read ? 'rgba(139,92,246,0.05)' : 'transparent', transition: 'background 0.2s', cursor: 'pointer' }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.1)')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = !n.read ? 'rgba(139,92,246,0.05)' : 'transparent')}>
 
                 {/* Icon */}
                 <div style={{ width: 44, height: 44, borderRadius: '50%', background: getIconBg(n.type), display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
@@ -144,11 +205,17 @@ export default function Notifications() {
                 {/* Text */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{ fontSize: 13, color: '#d1d5db', margin: 0, lineHeight: 1.5 }}>
-                    <span style={{ fontWeight: 700, color: '#f3f4f6' }}>@{n.fromUsername}</span>{' '}
+                    <span style={{ fontWeight: 700, color: '#f3f4f6' }}>#{n.fromUsername}</span>{' '}
                     {getMessage(n)}
                   </p>
-                  <p style={{ fontSize: 11, color: '#4b5563', margin: '4px 0 0' }}>
+                  <p style={{ fontSize: 11, color: '#4b5563', margin: '4px 0 0', display: 'flex', alignItems: 'center', gap: 6 }}>
                     {n.createdAt?.toDate ? new Date(n.createdAt.toDate()).toLocaleString() : 'Just now'}
+                    <span style={{ fontSize: 10, color: '#6b7280', background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: '1px 6px' }}>
+                      {n.type === 'message' || n.type === 'mention' || n.type === 'group_invite' ? '→ Open chat' :
+                       n.type === 'follow' ? '→ View profile' :
+                       n.type === 'like' || n.type === 'comment' || n.type === 'repost' ? '→ View post' :
+                       n.type === 'story_like' || n.type === 'story_reply' ? '→ View story' : '→ Open'}
+                    </span>
                   </p>
                 </div>
 

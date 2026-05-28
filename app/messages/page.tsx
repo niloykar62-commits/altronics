@@ -1,10 +1,9 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { auth, db, storage } from '@/lib/firebase';
-import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, addDoc, getDocs, orderBy,
@@ -12,7 +11,6 @@ import {
   updateDoc, onSnapshot, setDoc, deleteDoc,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
-import EmojiPicker, { QuickReactionBar, ReactionBubbles } from '@/components/EmojiPicker';
 
 export default function Messages() {
   const [user, setUser] = useState<any>(null);
@@ -44,36 +42,11 @@ export default function Messages() {
   const [mentionQuery, setMentionQuery] = useState('');           // text after # in input
   const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]); // users shown in dropdown
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);   // main emoji picker in input
+  const [emojiPickerTab, setEmojiPickerTab] = useState(0);          // tab index in picker
+  const [reactingToMsgId, setReactingToMsgId] = useState<string | null>(null); // msg getting reacted to
   const router = useRouter();
-
-  // ── Emoji state ───────────────────────────────────────────────────────────
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [hoveredMsgId, setHoveredMsgId] = useState<string | null>(null);
-  const [msgPickerOpenId, setMsgPickerOpenId] = useState<string | null>(null);
-
-  // ── Edit / Delete state ───────────────────────────────────────────────────
-  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
-  const [editingContent, setEditingContent] = useState('');
-  const [msgMenuOpenId, setMsgMenuOpenId] = useState<string | null>(null);
-  const editInputRef = useRef<HTMLInputElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
-
-  // ── Image upload state ────────────────────────────────────────────────────
-  const [imageUploadProgress, setImageUploadProgress] = useState<number | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
-
-  // ── Close msg context menu on outside click ───────────────────────────────
-  const msgMenuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!msgMenuOpenId) return;
-    const handler = (e: MouseEvent) => {
-      if (msgMenuRef.current && msgMenuRef.current.contains(e.target as Node)) return;
-      setMsgMenuOpenId(null);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [msgMenuOpenId]);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -87,6 +60,20 @@ export default function Messages() {
     });
     return () => unsubscribe();
   }, []);
+
+  // ── Auto-open chat from notification deep-link (?dm=uid or ?group=groupId) ──
+  useEffect(() => {
+    if (pageLoading) return;
+    const dmUid = searchParams.get('dm');
+    const groupId = searchParams.get('group');
+    if (dmUid) {
+      const target = allUsers.find((u: any) => u.id === dmUid);
+      if (target) openDM(target);
+    } else if (groupId) {
+      const target = groups.find((g: any) => g.id === groupId);
+      if (target) openGroup(target);
+    }
+  }, [pageLoading, searchParams]);
 
   // ── Presence: write online status, clean up on leave ──────────────────────
   useEffect(() => {
@@ -448,6 +435,41 @@ export default function Messages() {
     u.fullName?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // ── Emoji data ───────────────────────────────────────────────────────────
+  const EMOJI_TABS = [
+    { label: '😀', name: 'Smileys', emojis: ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿'] },
+    { label: '👍', name: 'Gestures', emojis: ['👍','👎','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👋','🤚','🖐️','✋','🖖','👏','🙌','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦵','🦶','👂','🦻','👃','🫀','🫁','🧠','🦷','🦴','👀','👁️','👅','👄','🫦'] },
+    { label: '❤️', name: 'Hearts', emojis: ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉️','☸️','✡️','🔯','🕎','☯️','☦️','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','🆔','⚛️'] },
+    { label: '🔥', name: 'Symbols', emojis: ['🔥','💯','✨','⭐','🌟','💫','⚡','🌈','🎉','🎊','🎈','🎁','🏆','🥇','🎯','🎪','🎭','🎨','🎬','🎤','🎧','🎼','🎹','🎸','🎺','🎻','🥁','🎮','🕹️','🎲','♟️','🃏','🀄','🎴','🔮','🧿','🪬','🧸','🪆','🖼️','🧩','🪅','🪃','🏹'] },
+    { label: '🐶', name: 'Animals', emojis: ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🐛','🦋','🐌','🐞','🐜','🦟','🦗','🕷️','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀'] },
+    { label: '🍕', name: 'Food', emojis: ['🍕','🍔','🌮','🌯','🥗','🍜','🍝','🍛','🍣','🍱','🥟','🦪','🍤','🍙','🍘','🍚','🍧','🍦','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🧁','🍷','🍸','🍹','🧉','🍺','🍻','🥂','☕','🍵','🧃','🥤','🧋','🍶','🥛','🍼'] },
+  ];
+
+  const QUICK_REACTIONS = ['❤️','😂','😮','😢','😡','👍','🔥','🥰'];
+
+  // Toggle emoji reaction on a message
+  const toggleReaction = async (msgId: string, emoji: string, collectionName: string) => {
+    if (!user) return;
+    try {
+      const msgRef = doc(db, collectionName, selectedChat.id, 'messages', msgId);
+      const msgDoc = await getDoc(msgRef);
+      if (!msgDoc.exists()) return;
+      const reactions: Record<string, string[]> = msgDoc.data().reactions || {};
+      const current: string[] = reactions[emoji] || [];
+      const hasReacted = current.includes(user.uid);
+      const updated = hasReacted
+        ? current.filter((id: string) => id !== user.uid)
+        : [...current, user.uid];
+      const newReactions = { ...reactions, [emoji]: updated };
+      // remove emoji key if nobody reacted
+      if (updated.length === 0) delete newReactions[emoji];
+      await updateDoc(msgRef, { reactions: newReactions });
+      // Optimistically update local state
+      setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, reactions: newReactions } : m));
+    } catch (err) { console.error(err); }
+    setReactingToMsgId(null);
+  };
+
   // Render text — highlight #mentions in purple
   const renderContent = (text: string) => {
     const parts = text.split(/(#[a-zA-Z0-9_]+)/g);
@@ -500,134 +522,6 @@ export default function Messages() {
     setMentionSuggestions([]);
     setMentionQuery('');
     setTimeout(() => { inputRef.current?.focus(); }, 0);
-  };
-
-  // ── Toggle emoji reaction on a message ───────────────────────────────────
-  const toggleReaction = async (msg: any, emoji: string) => {
-    if (!user || !selectedChat) return;
-    const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
-    const msgRef = doc(db, collectionName, selectedChat.id, 'messages', msg.id);
-    const reactions: Record<string, string[]> = msg.reactions || {};
-    const current: string[] = reactions[emoji] || [];
-    const updated = current.includes(user.uid)
-      ? current.filter((uid: string) => uid !== user.uid)
-      : [...current, user.uid];
-    const newReactions = { ...reactions, [emoji]: updated };
-    // Clean up empty arrays
-    if (updated.length === 0) delete newReactions[emoji];
-    try {
-      await updateDoc(msgRef, { reactions: newReactions });
-      // Optimistically update local state
-      setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, reactions: newReactions } : m));
-    } catch (err) { console.error(err); }
-    setMsgPickerOpenId(null);
-  };
-
-  // ── Edit a message ────────────────────────────────────────────────────────
-  const startEdit = (msg: any) => {
-    setEditingMsgId(msg.id);
-    setEditingContent(msg.content);
-    setMsgMenuOpenId(null);
-    setTimeout(() => editInputRef.current?.focus(), 50);
-  };
-
-  const saveEdit = async (msg: any) => {
-    const trimmed = editingContent.trim();
-    if (!trimmed || !selectedChat) return;
-    if (trimmed === msg.content) { setEditingMsgId(null); return; }
-    const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
-    try {
-      await updateDoc(doc(db, collectionName, selectedChat.id, 'messages', msg.id), {
-        content: trimmed,
-        editedAt: serverTimestamp(),
-      });
-      setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, content: trimmed, editedAt: true } : m));
-    } catch (err) { console.error(err); }
-    setEditingMsgId(null);
-    setEditingContent('');
-  };
-
-  const cancelEdit = () => { setEditingMsgId(null); setEditingContent(''); };
-
-  // ── Image upload helpers ──────────────────────────────────────────────────
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
-    if (file.size > 10 * 1024 * 1024) { alert('Image must be under 10 MB.'); return; }
-    setPendingImageFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setImagePreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
-    // reset input so same file can be re-selected
-    e.target.value = '';
-  };
-
-  const cancelImagePreview = () => {
-    setPendingImageFile(null);
-    setImagePreview(null);
-    setImageUploadProgress(null);
-  };
-
-  const sendImage = async () => {
-    if (!pendingImageFile || !user || !selectedChat) return;
-    const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
-    const path = `chat-images/${selectedChat.id}/${Date.now()}_${pendingImageFile.name}`;
-    const fileRef = storageRef(storage, path);
-    const uploadTask = uploadBytesResumable(fileRef, pendingImageFile);
-
-    setImageUploadProgress(0);
-
-    uploadTask.on(
-      'state_changed',
-      (snapshot) => {
-        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-        setImageUploadProgress(pct);
-      },
-      (err) => {
-        console.error(err);
-        alert('Upload failed: ' + err.message);
-        setImageUploadProgress(null);
-      },
-      async () => {
-        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-        await addDoc(collection(db, collectionName, selectedChat.id, 'messages'), {
-          senderId: user.uid,
-          senderUsername: userProfile?.username || 'me',
-          senderFullName: userProfile?.fullName || 'User',
-          content: newMessage.trim() || '',
-          imageUrl: downloadURL,
-          createdAt: serverTimestamp(),
-        });
-        if (selectedChat.type === 'dm') {
-          await addDoc(collection(db, 'notifications'), {
-            toUserId: selectedChat.otherUser.id, fromUserId: user.uid,
-            fromUsername: userProfile?.username || 'someone',
-            type: 'message', read: false, createdAt: serverTimestamp(),
-          });
-        }
-        cancelImagePreview();
-        setNewMessage('');
-        await loadMessages(collectionName, selectedChat.id);
-        if (selectedChat.type === 'dm') await markMessagesAsSeen(collectionName, selectedChat.id);
-      }
-    );
-  };
-
-  // ── Delete a message ──────────────────────────────────────────────────────
-  const deleteMessage = async (msg: any) => {
-    if (!selectedChat || !user) return;
-    setMsgMenuOpenId(null);
-    const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
-    try {
-      // Soft-delete: replace content with tombstone so reply threads don't break
-      await updateDoc(doc(db, collectionName, selectedChat.id, 'messages', msg.id), {
-        content: '',
-        deleted: true,
-        deletedAt: serverTimestamp(),
-      });
-      setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, content: '', deleted: true } : m));
-    } catch (err) { console.error(err); }
   };
 
   const inputStyle: React.CSSProperties = {
@@ -1047,8 +941,14 @@ export default function Messages() {
                     return (
                       <div key={msg.id}
                         style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', position: 'relative' }}
-                        onMouseEnter={() => { const btn = document.querySelector(`.reply-btn-${msg.id}`) as HTMLElement; if (btn) btn.style.opacity = '1'; setHoveredMsgId(msg.id); }}
-                        onMouseLeave={() => { const btn = document.querySelector(`.reply-btn-${msg.id}`) as HTMLElement; if (btn) btn.style.opacity = '0'; setHoveredMsgId(null); }}
+                        onMouseEnter={(e) => {
+                          const btn = e.currentTarget.querySelector('.reply-btn') as HTMLElement; if (btn) btn.style.opacity = '1';
+                          const rbtn = e.currentTarget.querySelector('.react-btn') as HTMLElement; if (rbtn) rbtn.style.opacity = '1';
+                        }}
+                        onMouseLeave={(e) => {
+                          const btn = e.currentTarget.querySelector('.reply-btn') as HTMLElement; if (btn) btn.style.opacity = '0';
+                          const rbtn = e.currentTarget.querySelector('.react-btn') as HTMLElement; if (rbtn) rbtn.style.opacity = '0';
+                        }}
                       >
                         {/* Sender name in group */}
                         {!isMe && selectedChat.type === 'group' && (
@@ -1057,158 +957,88 @@ export default function Messages() {
                           </span>
                         )}
 
-                        {/* Action column + bubble row */}
+                        {/* Reply button — hover/tap */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isMe ? 'row-reverse' : 'row' }}>
-
-                          {/* Side action buttons (reply, react, ⋯ menu) */}
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
-                            {/* Reply */}
-                            <button
-                              className={`reply-btn-${msg.id}`}
-                              onClick={() => setReplyingTo(msg)}
-                              style={{ opacity: 0, transition: 'opacity 0.15s', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#a78bfa', fontSize: 13, flexShrink: 0 }}
-                              title="Reply">↩</button>
-
-                            {/* Emoji react */}
-                            {!msg.deleted && (
-                              <div style={{ position: 'relative' }}>
-                                <button
-                                  onClick={() => setMsgPickerOpenId(msgPickerOpenId === msg.id ? null : msg.id)}
-                                  style={{ opacity: hoveredMsgId === msg.id || msgPickerOpenId === msg.id ? 1 : 0, transition: 'opacity 0.15s', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
-                                  title="React">😊</button>
-                                {msgPickerOpenId === msg.id && (
-                                  <EmojiPicker
-                                    onSelect={(emoji) => toggleReaction(msg, emoji)}
-                                    onClose={() => setMsgPickerOpenId(null)}
-                                    position="top"
-                                    align={isMe ? 'right' : 'left'}
-                                    style={{ width: 280 }}
-                                  />
-                                )}
-                              </div>
-                            )}
-
-                            {/* ⋯ context menu — only for own non-deleted messages */}
-                            {isMe && !msg.deleted && (
-                              <div style={{ position: 'relative' }}>
-                                <button
-                                  onClick={() => setMsgMenuOpenId(msgMenuOpenId === msg.id ? null : msg.id)}
-                                  style={{ opacity: hoveredMsgId === msg.id || msgMenuOpenId === msg.id ? 1 : 0, transition: 'opacity 0.15s', background: msgMenuOpenId === msg.id ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#9ca3af', fontSize: 16, flexShrink: 0, lineHeight: 1 }}
-                                  title="More options">⋯</button>
-
-                                {msgMenuOpenId === msg.id && (
-                                  <div
-                                    style={{ position: 'absolute', [isMe ? 'right' : 'left']: 0, bottom: '110%', zIndex: 200, background: '#111118', border: '0.5px solid rgba(139,92,246,0.25)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 16px 40px rgba(0,0,0,0.55)', minWidth: 140, animation: 'menuPop 0.15s cubic-bezier(0.34,1.56,0.64,1)' }}
-                                    onMouseDown={(e) => e.stopPropagation()}
-                                    ref={msgMenuRef}
-                                  >
-                                    <style>{`@keyframes menuPop { from { opacity:0; transform:scale(0.85) translateY(6px); } to { opacity:1; transform:scale(1) translateY(0); } }`}</style>
-                                    {/* Edit */}
-                                    <button
-                                      onClick={() => startEdit(msg)}
-                                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: 'transparent', border: 'none', cursor: 'pointer', color: '#e2e8f0', fontSize: 13, fontWeight: 600, fontFamily: 'Inter,sans-serif', transition: 'background 0.12s', textAlign: 'left' }}
-                                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.12)')}
-                                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
-                                      <span style={{ fontSize: 15 }}>✏️</span> Edit
-                                    </button>
-                                    <div style={{ height: '0.5px', background: 'rgba(255,255,255,0.06)', margin: '0 12px' }} />
-                                    {/* Delete */}
-                                    <button
-                                      onClick={() => deleteMessage(msg)}
-                                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: 'transparent', border: 'none', cursor: 'pointer', color: '#f87171', fontSize: 13, fontWeight: 600, fontFamily: 'Inter,sans-serif', transition: 'background 0.12s', textAlign: 'left' }}
-                                      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(239,68,68,0.1)')}
-                                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
-                                      <span style={{ fontSize: 15 }}>🗑️</span> Delete
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            className="reply-btn"
+                            onClick={() => setReplyingTo(msg)}
+                            style={{ opacity: 0, transition: 'opacity 0.15s', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#a78bfa', fontSize: 13, flexShrink: 0 }}
+                            title="Reply">
+                            ↩
+                          </button>
+                          <button
+                            className="react-btn"
+                            onClick={() => setReactingToMsgId(reactingToMsgId === msg.id ? null : msg.id)}
+                            style={{ opacity: 0, transition: 'opacity 0.15s', background: 'rgba(251,191,36,0.12)', border: '0.5px solid rgba(251,191,36,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, flexShrink: 0 }}
+                            title="React">
+                            😊
+                          </button>
 
                           <div style={{ maxWidth: '72%' }}>
                             {/* Reply preview inside bubble */}
                             {msg.replyTo && (
                               <div style={{ marginBottom: 4, padding: '6px 10px', borderRadius: '10px 10px 0 0', background: isMe ? 'rgba(0,0,0,0.25)' : 'rgba(139,92,246,0.12)', borderLeft: '3px solid #a78bfa' }}>
-                                <p style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', margin: '0 0 2px' }}>↩ #{msg.replyTo.senderUsername}</p>
-                                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>{msg.replyTo.content}</p>
+                                <p style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', margin: '0 0 2px' }}>
+                                  ↩ #{msg.replyTo.senderUsername}
+                                </p>
+                                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
+                                  {msg.replyTo.content}
+                                </p>
                               </div>
                             )}
 
-                            {/* Main bubble — or inline edit form */}
-                            {editingMsgId === msg.id ? (
-                              /* ── Inline edit input ── */
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                <input
-                                  ref={editInputRef}
-                                  value={editingContent}
-                                  onChange={(e) => setEditingContent(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(msg); }
-                                    if (e.key === 'Escape') cancelEdit();
-                                  }}
-                                  style={{ padding: '10px 14px', borderRadius: 14, background: 'rgba(139,92,246,0.12)', border: '1.5px solid rgba(139,92,246,0.5)', color: '#f3f4f6', fontSize: 13, fontFamily: 'Inter,sans-serif', outline: 'none', minWidth: 200 }}
-                                />
-                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                                  <button onClick={cancelEdit}
-                                    style={{ padding: '5px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
-                                    Cancel
-                                  </button>
-                                  <button onClick={() => saveEdit(msg)} disabled={!editingContent.trim()}
-                                    style={{ padding: '5px 12px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 11, fontWeight: 700, cursor: editingContent.trim() ? 'pointer' : 'not-allowed', opacity: editingContent.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif' }}>
-                                    Save
-                                  </button>
-                                </div>
-                                <p style={{ fontSize: 10, color: '#6b7280', margin: 0, textAlign: 'right' }}>Enter to save · Esc to cancel</p>
-                              </div>
-                            ) : (
-                              <div style={{ padding: msg.imageUrl ? '6px 6px 10px 6px' : '10px 14px', borderRadius: msg.replyTo ? (isMe ? '0 18px 4px 18px' : '18px 0 18px 4px') : (isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px'), background: msg.deleted ? 'rgba(255,255,255,0.03)' : (isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)'), border: msg.deleted ? '0.5px solid rgba(255,255,255,0.06)' : (isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)'), overflow: 'hidden' }}>
-                                {msg.deleted ? (
-                                  <p style={{ fontSize: 12, color: '#4b5563', fontStyle: 'italic', margin: 0 }}>🗑 Message deleted</p>
-                                ) : (
-                                  <>
-                                    {/* Image */}
-                                    {msg.imageUrl && (
-                                      <a href={msg.imageUrl} target="_blank" rel="noreferrer" style={{ display: 'block', marginBottom: msg.content ? 8 : 0 }}>
-                                        <img
-                                          src={msg.imageUrl}
-                                          alt="shared image"
-                                          style={{ display: 'block', maxWidth: '100%', width: 260, maxHeight: 320, objectFit: 'cover', borderRadius: 14, cursor: 'zoom-in' }}
-                                        />
-                                      </a>
-                                    )}
-                                    {/* Caption text */}
-                                    {msg.content && (
-                                      <p style={{ fontSize: 13, color: 'white', margin: msg.imageUrl ? '0 6px' : 0, lineHeight: 1.6 }}>{renderContent(msg.content)}</p>
-                                    )}
-                                    {msg.editedAt && (
-                                      <span style={{ fontSize: 9, color: isMe ? 'rgba(255,255,255,0.45)' : '#4b5563', fontStyle: 'italic' }}> · edited</span>
-                                    )}
-                                  </>
-                                )}
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4, padding: msg.imageUrl ? '0 6px' : 0 }}>
-                                  <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
-                                    {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            {/* Main bubble */}
+                            <div style={{ padding: '10px 14px', borderRadius: msg.replyTo ? (isMe ? '0 18px 4px 18px' : '18px 0 18px 4px') : (isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px'), background: isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)', border: isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)' }}>
+                              <p style={{ fontSize: 13, color: 'white', margin: 0, lineHeight: 1.6 }}>{renderContent(msg.content)}</p>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
+                                <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
+                                  {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                </span>
+                                {isMe && selectedChat.type === 'dm' && (
+                                  <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
+                                    title={(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? 'Seen' : 'Sent'}>
+                                    {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
                                   </span>
-                                  {isMe && selectedChat.type === 'dm' && (
-                                    <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
-                                      title={(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? 'Seen' : 'Sent'}>
-                                      {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
-                                    </span>
-                                  )}
-                                </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                            {/* Reaction display — show existing reactions under bubble */}
+                            {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4, justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+                                {Object.entries(msg.reactions as Record<string, string[]>)
+                                  .filter(([, uids]) => uids.length > 0)
+                                  .map(([emoji, uids]) => {
+                                    const iReacted = uids.includes(user.uid);
+                                    const collName = selectedChat.type === 'group' ? 'groups' : 'conversations';
+                                    return (
+                                      <button key={emoji}
+                                        onClick={() => toggleReaction(msg.id, emoji, collName)}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', borderRadius: 20, background: iReacted ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.06)', border: '0.5px solid ' + (iReacted ? 'rgba(139,92,246,0.5)' : 'rgba(255,255,255,0.1)'), cursor: 'pointer', transition: 'all 0.15s' }}>
+                                        <span style={{ fontSize: 14 }}>{emoji}</span>
+                                        <span style={{ fontSize: 11, fontWeight: 700, color: iReacted ? '#a78bfa' : '#9ca3af' }}>{uids.length}</span>
+                                      </button>
+                                    );
+                                  })}
                               </div>
                             )}
 
-                            {/* Reaction bubbles */}
-                            {!msg.deleted && msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                              <ReactionBubbles
-                                reactions={msg.reactions}
-                                myUid={user.uid}
-                                onToggle={(emoji) => toggleReaction(msg, emoji)}
-                              />
+                            {/* Quick reaction picker — shows on hover/long-press */}
+                            {reactingToMsgId === msg.id && (
+                              <div style={{ position: 'absolute', [isMe ? 'right' : 'left']: 0, bottom: '100%', marginBottom: 6, zIndex: 50, background: '#1a1a2e', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: 20, padding: '6px 10px', display: 'flex', gap: 4, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
+                                {QUICK_REACTIONS.map((emoji) => (
+                                  <button key={emoji}
+                                    onClick={() => toggleReaction(msg.id, emoji, selectedChat.type === 'group' ? 'groups' : 'conversations')}
+                                    style={{ fontSize: 20, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', borderRadius: 8, transition: 'transform 0.1s' }}
+                                    onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.35)')}
+                                    onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}>
+                                    {emoji}
+                                  </button>
+                                ))}
+                              </div>
                             )}
-                          </div>
                         </div>
                       </div>
                     );
@@ -1261,69 +1091,8 @@ export default function Messages() {
                     </div>
                   )}
 
-                  {/* Image preview bar */}
-                  {imagePreview && (
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, padding: '10px 16px', background: 'rgba(139,92,246,0.06)', borderBottom: '0.5px solid rgba(139,92,246,0.15)' }}>
-                      <div style={{ position: 'relative', flexShrink: 0 }}>
-                        <img src={imagePreview} alt="preview" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 12, border: '1.5px solid rgba(139,92,246,0.4)' }} />
-                        {imageUploadProgress !== null && imageUploadProgress < 100 && (
-                          <div style={{ position: 'absolute', inset: 0, borderRadius: 12, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            <span style={{ fontSize: 11, fontWeight: 700, color: '#a78bfa' }}>{imageUploadProgress}%</span>
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <p style={{ fontSize: 11, color: '#a78bfa', fontWeight: 600, margin: '0 0 4px' }}>
-                          {pendingImageFile?.name}
-                        </p>
-                        <p style={{ fontSize: 10, color: '#6b7280', margin: 0 }}>
-                          {pendingImageFile ? (pendingImageFile.size / 1024 < 1000
-                            ? `${(pendingImageFile.size / 1024).toFixed(1)} KB`
-                            : `${(pendingImageFile.size / (1024 * 1024)).toFixed(1)} MB`) : ''}
-                        </p>
-                      </div>
-                      <button onClick={cancelImagePreview} disabled={imageUploadProgress !== null && imageUploadProgress < 100}
-                        style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer', lineHeight: 1, flexShrink: 0, opacity: imageUploadProgress !== null && imageUploadProgress < 100 ? 0.4 : 1 }}>✕</button>
-                    </div>
-                  )}
-
                   {/* Input row */}
-                  <div style={{ padding: '10px 12px 20px', display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
-                    {/* Hidden file input */}
-                    <input
-                      ref={imageInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageSelect}
-                      style={{ display: 'none' }}
-                    />
-                    {/* Emoji picker for input */}
-                    {showEmojiPicker && (
-                      <EmojiPicker
-                        onSelect={(emoji) => {
-                          setNewMessage((prev) => prev + emoji);
-                          setTimeout(() => inputRef.current?.focus(), 0);
-                        }}
-                        onClose={() => setShowEmojiPicker(false)}
-                        position="top"
-                        align="left"
-                      />
-                    )}
-                    {/* Emoji button */}
-                    <button
-                      onClick={() => setShowEmojiPicker((v) => !v)}
-                      style={{ width: 36, height: 36, borderRadius: '50%', background: showEmojiPicker ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.3)', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.15s' }}
-                      title="Emoji">
-                      😊
-                    </button>
-                    {/* Image upload button */}
-                    <button
-                      onClick={() => imageInputRef.current?.click()}
-                      disabled={imageUploadProgress !== null && imageUploadProgress < 100}
-                      style={{ width: 36, height: 36, borderRadius: '50%', background: imagePreview ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.3)', fontSize: 17, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.15s', opacity: imageUploadProgress !== null && imageUploadProgress < 100 ? 0.5 : 1 }}
-                      title="Send image">
-                      🖼️
-                    </button>
+                  <div style={{ padding: '10px 12px 20px', display: 'flex', gap: 8, alignItems: 'center' }}>
                     {/* # mention trigger button */}
                     <button
                       onClick={() => {
@@ -1339,32 +1108,19 @@ export default function Messages() {
                     </button>
                     <input
                       ref={inputRef}
-                      placeholder={imagePreview ? 'Add a caption (optional)...' : (replyingTo ? `Reply to #${replyingTo.senderUsername}...` : `Message ${selectedChat.name}...`)}
+                      placeholder={replyingTo ? `Reply to #${replyingTo.senderUsername}...` : `Message ${selectedChat.name}...`}
                       value={newMessage}
                       onChange={handleInputChange}
                       onKeyDown={(e) => {
                         if (e.key === 'Escape') { setReplyingTo(null); setMentionSuggestions([]); }
-                        if (e.key === 'Enter' && !e.shiftKey) {
-                          e.preventDefault();
-                          if (pendingImageFile) sendImage();
-                          else sendMessage();
-                        }
+                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
                       }}
                       style={{ ...inputStyle, flex: 1, borderRadius: 24, padding: '10px 16px' }}
                     />
-                    {pendingImageFile ? (
-                      <button
-                        onClick={sendImage}
-                        disabled={imageUploadProgress !== null && imageUploadProgress < 100}
-                        style={{ padding: '10px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif', flexShrink: 0, opacity: imageUploadProgress !== null && imageUploadProgress < 100 ? 0.6 : 1 }}>
-                        {imageUploadProgress !== null && imageUploadProgress < 100 ? `${imageUploadProgress}%` : 'Send 🖼️'}
-                      </button>
-                    ) : (
-                      <button onClick={sendMessage} disabled={!newMessage.trim()}
-                        style={{ padding: '10px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: newMessage.trim() ? 'pointer' : 'not-allowed', opacity: newMessage.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
-                        Send
-                      </button>
-                    )}
+                    <button onClick={sendMessage} disabled={!newMessage.trim()}
+                      style={{ padding: '10px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: newMessage.trim() ? 'pointer' : 'not-allowed', opacity: newMessage.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
+                      Send
+                    </button>
                   </div>
                 </div>
               </>
