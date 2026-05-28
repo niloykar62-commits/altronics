@@ -11,6 +11,7 @@ import {
   updateDoc, onSnapshot, setDoc, deleteDoc,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
+import EmojiPicker, { QuickReactionBar, ReactionBubbles } from '@/components/EmojiPicker';
 
 export default function Messages() {
   const [user, setUser] = useState<any>(null);
@@ -43,6 +44,11 @@ export default function Messages() {
   const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]); // users shown in dropdown
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+
+  // ── Emoji state ───────────────────────────────────────────────────────────
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [hoveredMsgId, setHoveredMsgId] = useState<string | null>(null);
+  const [msgPickerOpenId, setMsgPickerOpenId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -471,6 +477,27 @@ export default function Messages() {
     setTimeout(() => { inputRef.current?.focus(); }, 0);
   };
 
+  // ── Toggle emoji reaction on a message ───────────────────────────────────
+  const toggleReaction = async (msg: any, emoji: string) => {
+    if (!user || !selectedChat) return;
+    const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
+    const msgRef = doc(db, collectionName, selectedChat.id, 'messages', msg.id);
+    const reactions: Record<string, string[]> = msg.reactions || {};
+    const current: string[] = reactions[emoji] || [];
+    const updated = current.includes(user.uid)
+      ? current.filter((uid: string) => uid !== user.uid)
+      : [...current, user.uid];
+    const newReactions = { ...reactions, [emoji]: updated };
+    // Clean up empty arrays
+    if (updated.length === 0) delete newReactions[emoji];
+    try {
+      await updateDoc(msgRef, { reactions: newReactions });
+      // Optimistically update local state
+      setMessages((prev) => prev.map((m) => m.id === msg.id ? { ...m, reactions: newReactions } : m));
+    } catch (err) { console.error(err); }
+    setMsgPickerOpenId(null);
+  };
+
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '10px 14px',
     background: 'rgba(139,92,246,0.08)',
@@ -888,8 +915,8 @@ export default function Messages() {
                     return (
                       <div key={msg.id}
                         style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start', position: 'relative' }}
-                        onMouseEnter={(e) => { const btn = e.currentTarget.querySelector('.reply-btn') as HTMLElement; if (btn) btn.style.opacity = '1'; }}
-                        onMouseLeave={(e) => { const btn = e.currentTarget.querySelector('.reply-btn') as HTMLElement; if (btn) btn.style.opacity = '0'; }}
+                        onMouseEnter={() => { const btn = document.querySelector(`.reply-btn-${msg.id}`) as HTMLElement; if (btn) btn.style.opacity = '1'; setHoveredMsgId(msg.id); }}
+                        onMouseLeave={() => { const btn = document.querySelector(`.reply-btn-${msg.id}`) as HTMLElement; if (btn) btn.style.opacity = '0'; setHoveredMsgId(null); }}
                       >
                         {/* Sender name in group */}
                         {!isMe && selectedChat.type === 'group' && (
@@ -898,15 +925,36 @@ export default function Messages() {
                           </span>
                         )}
 
-                        {/* Reply button — hover/tap */}
+                        {/* Reply + Emoji reaction action row */}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexDirection: isMe ? 'row-reverse' : 'row' }}>
-                          <button
-                            className="reply-btn"
-                            onClick={() => setReplyingTo(msg)}
-                            style={{ opacity: 0, transition: 'opacity 0.15s', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#a78bfa', fontSize: 13, flexShrink: 0 }}
-                            title="Reply">
-                            ↩
-                          </button>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'center' }}>
+                            <button
+                              className={`reply-btn-${msg.id}`}
+                              onClick={() => setReplyingTo(msg)}
+                              style={{ opacity: 0, transition: 'opacity 0.15s', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#a78bfa', fontSize: 13, flexShrink: 0 }}
+                              title="Reply">
+                              ↩
+                            </button>
+                            {/* Emoji react button */}
+                            <div style={{ position: 'relative' }}>
+                              <button
+                                onClick={() => setMsgPickerOpenId(msgPickerOpenId === msg.id ? null : msg.id)}
+                                style={{ opacity: hoveredMsgId === msg.id || msgPickerOpenId === msg.id ? 1 : 0, transition: 'opacity 0.15s', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, flexShrink: 0 }}
+                                title="React">
+                                😊
+                              </button>
+                              {/* Full emoji picker for this message */}
+                              {msgPickerOpenId === msg.id && (
+                                <EmojiPicker
+                                  onSelect={(emoji) => toggleReaction(msg, emoji)}
+                                  onClose={() => setMsgPickerOpenId(null)}
+                                  position="top"
+                                  align={isMe ? 'right' : 'left'}
+                                  style={{ width: 280 }}
+                                />
+                              )}
+                            </div>
+                          </div>
 
                           <div style={{ maxWidth: '72%' }}>
                             {/* Reply preview inside bubble */}
@@ -936,6 +984,15 @@ export default function Messages() {
                                 )}
                               </div>
                             </div>
+
+                            {/* Reaction bubbles */}
+                            {msg.reactions && Object.keys(msg.reactions).length > 0 && (
+                              <ReactionBubbles
+                                reactions={msg.reactions}
+                                myUid={user.uid}
+                                onToggle={(emoji) => toggleReaction(msg, emoji)}
+                              />
+                            )}
                           </div>
                         </div>
                       </div>
@@ -990,7 +1047,26 @@ export default function Messages() {
                   )}
 
                   {/* Input row */}
-                  <div style={{ padding: '10px 12px 20px', display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ padding: '10px 12px 20px', display: 'flex', gap: 8, alignItems: 'center', position: 'relative' }}>
+                    {/* Emoji picker for input */}
+                    {showEmojiPicker && (
+                      <EmojiPicker
+                        onSelect={(emoji) => {
+                          setNewMessage((prev) => prev + emoji);
+                          setTimeout(() => inputRef.current?.focus(), 0);
+                        }}
+                        onClose={() => setShowEmojiPicker(false)}
+                        position="top"
+                        align="left"
+                      />
+                    )}
+                    {/* Emoji button */}
+                    <button
+                      onClick={() => setShowEmojiPicker((v) => !v)}
+                      style={{ width: 36, height: 36, borderRadius: '50%', background: showEmojiPicker ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.3)', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.15s' }}
+                      title="Emoji">
+                      😊
+                    </button>
                     {/* # mention trigger button */}
                     <button
                       onClick={() => {
