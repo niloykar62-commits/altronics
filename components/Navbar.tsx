@@ -70,6 +70,7 @@ export default function Navbar() {
         backdropFilter: 'blur(20px)',
         borderTop: '0.5px solid rgba(139,92,246,0.15)',
         padding: '8px 0 16px',
+        display: pathname === '/messages' ? 'none' : 'block',
       }}>
         <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
           {navItems.map(({ href, icon, label, badge }) => {

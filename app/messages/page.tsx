@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
@@ -46,8 +47,7 @@ export default function Messages() {
 
   // Load Jitsi script
   useEffect(() => {
-    // ✅ AFTER — cast to `any` to bypass TypeScript's strict type check
-      if (typeof window !== 'undefined' && !(window as any).JitsiMeetExternalAPI) {
+    if (typeof window !== 'undefined' && !(window as any).JitsiMeetExternalAPI) {
       const script = document.createElement('script');
       script.src = 'https://meet.jit.si/external_api.js';
       script.async = true;
@@ -285,11 +285,22 @@ export default function Messages() {
         </div>
       )}
 
-      <div style={{ maxWidth: 1000, margin: '0 auto', paddingBottom: 80 }}>
-        <div style={{ display: 'flex', height: 'calc(100vh - 130px)' }}>
+      <div style={{ maxWidth: 1000, margin: '0 auto' }}>
+        <div style={{ display: 'flex', height: 'calc(100vh - 50px)', position: 'relative', overflow: 'hidden' }}>
 
-          {/* Left panel */}
-          <div style={{ width: 300, borderRight: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+          {/* Left panel — slides out on mobile when chat is open */}
+          <div style={{
+            flexShrink: 0,
+            display: 'flex', flexDirection: 'column',
+            borderRight: '0.5px solid rgba(139,92,246,0.15)',
+            background: '#0a0a0f',
+            position: 'absolute', top: 0, left: 0, bottom: 0,
+            width: '100%',
+            maxWidth: 320,
+            zIndex: 10,
+            transform: selectedChat ? 'translateX(-100%)' : 'translateX(0)',
+            transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
+          }}>
             <div style={{ padding: '16px 16px 12px', borderBottom: '0.5px solid rgba(139,92,246,0.1)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <h1 style={{ fontSize: 18, fontWeight: 800, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>Messages</h1>
@@ -315,7 +326,7 @@ export default function Messages() {
               </div>
             )}
 
-            <div style={{ flex: 1, overflowY: 'auto' }}>
+            <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
               {activeTab === 'dms' ? (
                 filteredUsers.map((u: any) => (
                   <div key={u.id} onClick={() => openDM(u)}
@@ -356,24 +367,36 @@ export default function Messages() {
             </div>
           </div>
 
-          {/* Right panel */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {/* Right panel — full screen on mobile */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            display: 'flex', flexDirection: 'column',
+            background: '#0a0a0f',
+            transform: selectedChat ? 'translateX(0)' : 'translateX(100%)',
+            transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1)',
+            zIndex: 20,
+          }}>
             {selectedChat ? (
               <>
-                {/* Chat header with call buttons */}
-                <div style={{ padding: '12px 20px', borderBottom: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 38, height: 38, borderRadius: selectedChat.type === 'group' ? 10 : '50%', background: selectedChat.type === 'group' ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, color: selectedChat.type === 'group' ? 'white' : '#a78bfa', flexShrink: 0 }}>
+                {/* Chat header with back button + call buttons */}
+                <div style={{ padding: '12px 16px', borderBottom: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {/* Back button */}
+                  <button onClick={() => { setSelectedChat(null); setInCall(false); setMessages([]); }}
+                    style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.25)', color: '#a78bfa', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, lineHeight: 1 }}>
+                    ‹
+                  </button>
+                  <div style={{ width: 36, height: 36, borderRadius: selectedChat.type === 'group' ? 10 : '50%', background: selectedChat.type === 'group' ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, color: selectedChat.type === 'group' ? 'white' : '#a78bfa', flexShrink: 0 }}>
                     {selectedChat.name?.[0]?.toUpperCase() || 'U'}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: 14, fontWeight: 700, color: '#f3f4f6', margin: 0 }}>{selectedChat.name}</p>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 14, fontWeight: 700, color: '#f3f4f6', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedChat.name}</p>
                     <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>
                       {selectedChat.type === 'group' ? `${selectedChat.memberCount} members` : `@${selectedChat.username}`}
                     </p>
                   </div>
 
                   {/* Call buttons */}
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => startCall('voice')}
                       style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', border: '0.5px solid rgba(52,211,153,0.3)', color: '#34d399', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
                       title="Voice call"
@@ -452,7 +475,7 @@ export default function Messages() {
                 </div>
 
                 {/* Message input */}
-                <div style={{ padding: '12px 20px', borderTop: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ padding: '12px 20px 20px', borderTop: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', gap: 10, alignItems: 'center' }}>
                   <input
                     placeholder={`Message ${selectedChat.name}...`}
                     value={newMessage}
@@ -490,6 +513,37 @@ export default function Messages() {
           </div>
         </div>
       </div>
+      {/* Inline bottom nav for messages page */}
+      <nav style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 30,
+        background: selectedChat ? 'transparent' : 'rgba(10,10,15,0.95)',
+        backdropFilter: selectedChat ? 'none' : 'blur(20px)',
+        borderTop: selectedChat ? 'none' : '0.5px solid rgba(139,92,246,0.15)',
+        padding: selectedChat ? '0' : '8px 0 16px',
+        pointerEvents: selectedChat ? 'none' : 'auto',
+        transition: 'all 0.3s',
+      }}>
+        {!selectedChat && (
+          <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
+            {[
+              { href: '/feed', icon: '🏠', label: 'Home' },
+              { href: '/stories', icon: '✨', label: 'Stories' },
+              { href: '/search', icon: '🔍', label: 'Search' },
+              { href: '/messages', icon: '💬', label: 'DMs', active: true },
+              { href: '/notifications', icon: '🔔', label: 'Alerts' },
+              { href: '/profile', icon: '👤', label: 'Profile' },
+            ].map(({ href, icon, label, active }) => (
+              <Link key={href} href={href} style={{ textDecoration: 'none' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 12px', borderRadius: 14, background: active ? 'rgba(139,92,246,0.15)' : 'transparent', cursor: 'pointer' }}>
+                  <span style={{ fontSize: 20 }}>{icon}</span>
+                  <span style={{ fontSize: 9, fontWeight: 600, color: active ? '#a78bfa' : '#6b7280' }}>{label}</span>
+                  {active && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#a78bfa' }} />}
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+      </nav>
     </div>
   );
 }
