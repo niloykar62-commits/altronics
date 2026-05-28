@@ -33,6 +33,11 @@ export default function Messages() {
   const jitsiRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [onlineUsers, setOnlineUsers] = useState<Record<string, boolean>>({});
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [groupInfo, setGroupInfo] = useState<any>(null);
+  const [editingGroupName, setEditingGroupName] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [addMemberSearch, setAddMemberSearch] = useState('');
   const router = useRouter();
 
   useEffect(() => {
@@ -114,9 +119,111 @@ export default function Messages() {
   };
 
   const openGroup = async (group: any) => {
-    setSelectedChat({ type: 'group', id: group.id, name: group.name, memberCount: group.members?.length || 0 });
+    // Load full group doc for admin/member info
+    const groupDoc = await getDoc(doc(db, 'groups', group.id));
+    const fullGroup = groupDoc.exists() ? { id: group.id, ...groupDoc.data() } : group;
+    setSelectedChat({ type: 'group', id: group.id, name: fullGroup.name, memberCount: fullGroup.members?.length || 0, groupData: fullGroup });
     setInCall(false);
+    setShowGroupInfo(false);
     await loadMessages('groups', group.id);
+    await loadGroupInfo(group.id);
+  };
+
+  const loadGroupInfo = async (groupId: string) => {
+    try {
+      const groupDoc = await getDoc(doc(db, 'groups', groupId));
+      if (!groupDoc.exists()) return;
+      const data = { id: groupId, ...groupDoc.data() } as any;
+      // Resolve member profiles
+      const memberProfiles = await Promise.all(
+        (data.members || []).map(async (uid: string) => {
+          const uDoc = await getDoc(doc(db, 'users', uid));
+          return uDoc.exists() ? { id: uid, ...uDoc.data() } : { id: uid, fullName: 'Unknown', username: uid };
+        })
+      );
+      setGroupInfo({ ...data, memberProfiles });
+    } catch (err) { console.error(err); }
+  };
+
+  const isGroupAdmin = () => groupInfo && (groupInfo.createdBy === user?.uid || (groupInfo.admins || []).includes(user?.uid));
+
+  const renameGroup = async () => {
+    if (!newGroupName.trim() || !groupInfo) return;
+    try {
+      await updateDoc(doc(db, 'groups', groupInfo.id), { name: newGroupName.trim(), avatar: newGroupName.trim()[0].toUpperCase() });
+      setGroupInfo((prev: any) => ({ ...prev, name: newGroupName.trim() }));
+      setSelectedChat((prev: any) => ({ ...prev, name: newGroupName.trim() }));
+      await loadGroups(user.uid);
+      setEditingGroupName(false);
+      setNewGroupName('');
+    } catch (err: any) { alert('Failed: ' + err.message); }
+  };
+
+  const leaveGroup = async () => {
+    if (!groupInfo || !user) return;
+    if (!confirm('Leave this group?')) return;
+    try {
+      const newMembers = (groupInfo.members || []).filter((id: string) => id !== user.uid);
+      const newAdmins = (groupInfo.admins || []).filter((id: string) => id !== user.uid);
+      if (newMembers.length === 0) {
+        await deleteDoc(doc(db, 'groups', groupInfo.id));
+      } else {
+        // If leaving admin was the only admin, promote oldest member
+        const updatedAdmins = newAdmins.length === 0 && groupInfo.createdBy === user.uid
+          ? [newMembers[0]]
+          : newAdmins;
+        await updateDoc(doc(db, 'groups', groupInfo.id), {
+          members: newMembers,
+          admins: updatedAdmins,
+          ...(groupInfo.createdBy === user.uid ? { createdBy: newMembers[0] } : {}),
+        });
+      }
+      setSelectedChat(null);
+      setGroupInfo(null);
+      setShowGroupInfo(false);
+      await loadGroups(user.uid);
+    } catch (err: any) { alert('Failed: ' + err.message); }
+  };
+
+  const removeMember = async (memberId: string) => {
+    if (!isGroupAdmin() || !groupInfo) return;
+    if (!confirm('Remove this member?')) return;
+    try {
+      const newMembers = (groupInfo.members || []).filter((id: string) => id !== memberId);
+      const newAdmins = (groupInfo.admins || []).filter((id: string) => id !== memberId);
+      await updateDoc(doc(db, 'groups', groupInfo.id), { members: newMembers, admins: newAdmins });
+      await loadGroupInfo(groupInfo.id);
+      setSelectedChat((prev: any) => ({ ...prev, memberCount: newMembers.length }));
+    } catch (err: any) { alert('Failed: ' + err.message); }
+  };
+
+  const toggleAdmin = async (memberId: string) => {
+    if (!isGroupAdmin() || !groupInfo) return;
+    const admins: string[] = groupInfo.admins || [];
+    const newAdmins = admins.includes(memberId)
+      ? admins.filter((id: string) => id !== memberId)
+      : [...admins, memberId];
+    try {
+      await updateDoc(doc(db, 'groups', groupInfo.id), { admins: newAdmins });
+      await loadGroupInfo(groupInfo.id);
+    } catch (err: any) { alert('Failed: ' + err.message); }
+  };
+
+  const addMemberToGroup = async (memberId: string) => {
+    if (!isGroupAdmin() || !groupInfo) return;
+    if ((groupInfo.members || []).includes(memberId)) return;
+    try {
+      const newMembers = [...(groupInfo.members || []), memberId];
+      await updateDoc(doc(db, 'groups', groupInfo.id), { members: newMembers });
+      await addDoc(collection(db, 'notifications'), {
+        toUserId: memberId, fromUserId: user.uid,
+        fromUsername: userProfile?.username || 'someone',
+        type: 'group_invite', read: false, createdAt: serverTimestamp(),
+        groupName: groupInfo.name,
+      });
+      await loadGroupInfo(groupInfo.id);
+      setSelectedChat((prev: any) => ({ ...prev, memberCount: newMembers.length }));
+    } catch (err: any) { alert('Failed: ' + err.message); }
   };
 
   const loadMessages = async (collectionName: string, chatId: string) => {
@@ -253,6 +360,7 @@ export default function Messages() {
       await addDoc(collection(db, 'groups'), {
         name: groupName.trim(), members,
         createdBy: user.uid, createdByUsername: userProfile?.username || 'someone',
+        admins: [user.uid],
         createdAt: serverTimestamp(), avatar: groupName.trim()[0].toUpperCase(),
       });
       for (const memberId of selectedMembers) {
@@ -484,8 +592,172 @@ export default function Messages() {
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.15)')}>
                       🎥
                     </button>
+                    {/* Group info button */}
+                    {selectedChat.type === 'group' && (
+                      <button onClick={() => setShowGroupInfo(true)}
+                        style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(251,191,36,0.15)', border: '0.5px solid rgba(251,191,36,0.3)', color: '#fbbf24', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+                        title="Group info">
+                        ⚙
+                      </button>
+                    )}
                   </div>
                 </div>
+
+                {/* ── Group Info Panel ─────────────────────────────────────────── */}
+                {showGroupInfo && selectedChat.type === 'group' && (
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, display: 'flex', flexDirection: 'column', background: '#0a0a0f' }}>
+                    {/* Panel header */}
+                    <div style={{ padding: '14px 16px', borderBottom: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <button onClick={() => setShowGroupInfo(false)}
+                        style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.25)', color: '#a78bfa', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        ‹
+                      </button>
+                      <p style={{ fontSize: 15, fontWeight: 800, color: '#f3f4f6', margin: 0 }}>Group Info</p>
+                    </div>
+                    <div style={{ flex: 1, overflowY: 'auto', padding: '0 0 80px' }}>
+                      {groupInfo ? (
+                        <>
+                          {/* Group avatar + name */}
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px 20px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.05)' }}>
+                            <div style={{ width: 72, height: 72, borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 32, fontWeight: 800, color: 'white', marginBottom: 14 }}>
+                              {groupInfo.name?.[0]?.toUpperCase() || 'G'}
+                            </div>
+                            {editingGroupName ? (
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', maxWidth: 280 }}>
+                                <input
+                                  value={newGroupName}
+                                  onChange={(e) => setNewGroupName(e.target.value)}
+                                  placeholder={groupInfo.name}
+                                  onKeyDown={(e) => { if (e.key === 'Enter') renameGroup(); if (e.key === 'Escape') setEditingGroupName(false); }}
+                                  style={{ flex: 1, padding: '8px 14px', borderRadius: 12, background: 'rgba(139,92,246,0.1)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#f3f4f6', fontSize: 14, fontWeight: 700, fontFamily: 'Inter,sans-serif', outline: 'none' }}
+                                  autoFocus
+                                />
+                                <button onClick={renameGroup} style={{ padding: '8px 14px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Save</button>
+                                <button onClick={() => setEditingGroupName(false)} style={{ padding: '8px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>✕</button>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <p style={{ fontSize: 18, fontWeight: 800, color: '#f3f4f6', margin: 0 }}>{groupInfo.name}</p>
+                                {isGroupAdmin() && (
+                                  <button onClick={() => { setNewGroupName(groupInfo.name); setEditingGroupName(true); }}
+                                    style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#6b7280', padding: 4 }} title="Rename group">✏️</button>
+                                )}
+                              </div>
+                            )}
+                            <p style={{ fontSize: 12, color: '#6b7280', margin: '6px 0 0' }}>{groupInfo.memberProfiles?.length || 0} members</p>
+                          </div>
+
+                          {/* Add member (admin only) */}
+                          {isGroupAdmin() && (
+                            <div style={{ padding: '16px 16px 0' }}>
+                              <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Add Members</p>
+                              <input
+                                placeholder="Search users to add..."
+                                value={addMemberSearch}
+                                onChange={(e) => setAddMemberSearch(e.target.value)}
+                                style={{ width: '100%', padding: '9px 14px', borderRadius: 20, background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)', color: '#f3f4f6', fontSize: 13, fontFamily: 'Inter,sans-serif', outline: 'none', boxSizing: 'border-box' }}
+                              />
+                              {addMemberSearch.trim() && (
+                                <div style={{ marginTop: 8, borderRadius: 14, overflow: 'hidden', border: '0.5px solid rgba(139,92,246,0.15)' }}>
+                                  {allUsers
+                                    .filter((u: any) => !( groupInfo.members || []).includes(u.id) &&
+                                      (u.fullName?.toLowerCase().includes(addMemberSearch.toLowerCase()) || u.username?.toLowerCase().includes(addMemberSearch.toLowerCase())))
+                                    .slice(0, 4)
+                                    .map((u: any) => (
+                                      <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+                                        <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, color: '#a78bfa', flexShrink: 0 }}>
+                                          {u.fullName?.[0]?.toUpperCase() || 'U'}
+                                        </div>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                          <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>{u.fullName}</p>
+                                          <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>@{u.username}</p>
+                                        </div>
+                                        <button onClick={() => { addMemberToGroup(u.id); setAddMemberSearch(''); }}
+                                          style={{ padding: '6px 12px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0, fontFamily: 'Inter,sans-serif' }}>
+                                          + Add
+                                        </button>
+                                      </div>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Member list */}
+                          <div style={{ padding: '16px 16px 0' }}>
+                            <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
+                              Members ({groupInfo.memberProfiles?.length || 0})
+                            </p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              {(groupInfo.memberProfiles || []).map((member: any) => {
+                                const isOwner = groupInfo.createdBy === member.id;
+                                const isMemberAdmin = (groupInfo.admins || []).includes(member.id) || isOwner;
+                                const isMe = member.id === user?.uid;
+                                return (
+                                  <div key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 14, background: 'rgba(255,255,255,0.02)' }}>
+                                    {/* Avatar with online dot */}
+                                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                                      <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', border: '1px solid rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, color: '#a78bfa' }}>
+                                        {member.fullName?.[0]?.toUpperCase() || 'U'}
+                                      </div>
+                                      {onlineUsers[member.id] && (
+                                        <div style={{ position: 'absolute', bottom: 1, right: 1, width: 10, height: 10, borderRadius: '50%', background: '#22c55e', border: '2px solid #0a0a0f' }} />
+                                      )}
+                                    </div>
+                                    {/* Info */}
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>
+                                          {member.fullName}{isMe ? ' (You)' : ''}
+                                        </p>
+                                        {isOwner && (
+                                          <span style={{ fontSize: 9, fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,0.15)', border: '0.5px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '1px 6px' }}>Owner</span>
+                                        )}
+                                        {!isOwner && isMemberAdmin && (
+                                          <span style={{ fontSize: 9, fontWeight: 700, color: '#a78bfa', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: 6, padding: '1px 6px' }}>Admin</span>
+                                        )}
+                                      </div>
+                                      <p style={{ fontSize: 11, color: onlineUsers[member.id] ? '#22c55e' : '#6b7280', margin: 0, fontWeight: onlineUsers[member.id] ? 600 : 400 }}>
+                                        {onlineUsers[member.id] ? '● Active now' : `@${member.username}`}
+                                      </p>
+                                    </div>
+                                    {/* Admin actions */}
+                                    {isGroupAdmin() && !isMe && !isOwner && (
+                                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                                        <button onClick={() => toggleAdmin(member.id)}
+                                          title={isMemberAdmin ? 'Remove admin' : 'Make admin'}
+                                          style={{ padding: '5px 10px', borderRadius: 8, background: isMemberAdmin ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.06)', border: '0.5px solid ' + (isMemberAdmin ? 'rgba(139,92,246,0.4)' : 'rgba(255,255,255,0.1)'), color: isMemberAdmin ? '#a78bfa' : '#9ca3af', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                                          {isMemberAdmin ? '★ Admin' : '☆ Admin'}
+                                        </button>
+                                        <button onClick={() => removeMember(member.id)}
+                                          title="Remove from group"
+                                          style={{ padding: '5px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                                          Remove
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Leave group */}
+                          <div style={{ padding: '20px 16px' }}>
+                            <button onClick={leaveGroup}
+                              style={{ width: '100%', padding: '13px', borderRadius: 14, background: 'rgba(239,68,68,0.08)', border: '0.5px solid rgba(239,68,68,0.25)', color: '#f87171', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                              🚪 Leave Group
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 200 }}>
+                          <p style={{ color: '#6b7280', fontSize: 13 }}>Loading...</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Jitsi call window */}
                 {inCall && (
