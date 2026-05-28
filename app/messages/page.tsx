@@ -8,6 +8,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, addDoc, getDocs, orderBy,
   query, serverTimestamp, doc, getDoc, where,
+  updateDoc, onSnapshot, setDoc, deleteDoc,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
 
@@ -30,6 +31,8 @@ export default function Messages() {
   const [callType, setCallType] = useState<'video' | 'voice'>('video');
   const [callRoomId, setCallRoomId] = useState('');
   const jitsiRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [onlineUsers, setOnlineUsers] = useState<Record<string, boolean>>({});
   const router = useRouter();
 
   useEffect(() => {
@@ -43,6 +46,38 @@ export default function Messages() {
       setPageLoading(false);
     });
     return () => unsubscribe();
+  }, []);
+
+  // ── Presence: write online status, clean up on leave ──────────────────────
+  useEffect(() => {
+    if (!user) return;
+    const presenceRef = doc(db, 'presence', user.uid);
+    setDoc(presenceRef, { online: true, lastSeen: serverTimestamp() });
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        setDoc(presenceRef, { online: false, lastSeen: serverTimestamp() });
+      } else {
+        setDoc(presenceRef, { online: true, lastSeen: serverTimestamp() });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('beforeunload', () =>
+      setDoc(presenceRef, { online: false, lastSeen: serverTimestamp() })
+    );
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      setDoc(presenceRef, { online: false, lastSeen: serverTimestamp() });
+    };
+  }, [user]);
+
+  // ── Listen to online status of all users in real-time ────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'presence'), (snap) => {
+      const map: Record<string, boolean> = {};
+      snap.docs.forEach((d) => { map[d.id] = d.data().online === true; });
+      setOnlineUsers(map);
+    });
+    return () => unsub();
   }, []);
 
   // Load Jitsi script
@@ -75,6 +110,7 @@ export default function Messages() {
     setSelectedChat({ type: 'dm', id: convId, name: otherUser.fullName, username: otherUser.username, otherUser });
     setInCall(false);
     await loadMessages('conversations', convId);
+    await markMessagesAsSeen('conversations', convId);
   };
 
   const openGroup = async (group: any) => {
@@ -88,6 +124,26 @@ export default function Messages() {
       const q = query(collection(db, collectionName, chatId, 'messages'), orderBy('createdAt', 'asc'));
       const snapshot = await getDocs(q);
       setMessages(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 80);
+    } catch (err) { console.error(err); }
+  };
+
+  const markMessagesAsSeen = async (collectionName: string, chatId: string) => {
+    if (!user) return;
+    try {
+      const q = query(collection(db, collectionName, chatId, 'messages'), orderBy('createdAt', 'asc'));
+      const snap = await getDocs(q);
+      const batch: Promise<void>[] = [];
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const seenBy: string[] = data.seenBy || [];
+        if (data.senderId !== user.uid && !seenBy.includes(user.uid)) {
+          batch.push(updateDoc(doc(db, collectionName, chatId, 'messages', d.id), {
+            seenBy: [...seenBy, user.uid],
+          }));
+        }
+      });
+      await Promise.all(batch);
     } catch (err) { console.error(err); }
   };
 
@@ -111,6 +167,7 @@ export default function Messages() {
       }
       setNewMessage('');
       await loadMessages(collectionName, selectedChat.id);
+      if (selectedChat.type === 'dm') await markMessagesAsSeen(collectionName, selectedChat.id);
     } catch (err) { console.error(err); }
   };
 
@@ -333,12 +390,20 @@ export default function Messages() {
                     style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer', borderBottom: '0.5px solid rgba(255,255,255,0.03)', background: selectedChat?.otherUser?.id === u.id ? 'rgba(139,92,246,0.1)' : 'transparent', transition: 'background 0.2s' }}
                     onMouseEnter={(e) => { if (selectedChat?.otherUser?.id !== u.id) e.currentTarget.style.background = 'rgba(139,92,246,0.05)'; }}
                     onMouseLeave={(e) => { if (selectedChat?.otherUser?.id !== u.id) e.currentTarget.style.background = 'transparent'; }}>
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', border: '1px solid rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, color: '#a78bfa', flexShrink: 0 }}>
-                      {u.fullName?.[0]?.toUpperCase() || 'U'}
+                    {/* Avatar with online dot */}
+                    <div style={{ position: 'relative', flexShrink: 0 }}>
+                      <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', border: '1px solid rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, color: '#a78bfa' }}>
+                        {u.fullName?.[0]?.toUpperCase() || 'U'}
+                      </div>
+                      {onlineUsers[u.id] && (
+                        <div style={{ position: 'absolute', bottom: 1, right: 1, width: 11, height: 11, borderRadius: '50%', background: '#22c55e', border: '2px solid #0a0a0f' }} />
+                      )}
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>{u.fullName}</p>
-                      <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>@{u.username}</p>
+                      <p style={{ fontSize: 11, color: onlineUsers[u.id] ? '#22c55e' : '#6b7280', margin: 0, fontWeight: onlineUsers[u.id] ? 600 : 400 }}>
+                        {onlineUsers[u.id] ? '● Active now' : `@${u.username}`}
+                      </p>
                     </div>
                   </div>
                 ))
@@ -390,8 +455,16 @@ export default function Messages() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: 14, fontWeight: 700, color: '#f3f4f6', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedChat.name}</p>
-                    <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>
-                      {selectedChat.type === 'group' ? `${selectedChat.memberCount} members` : `@${selectedChat.username}`}
+                    <p style={{ fontSize: 11, margin: 0, display: 'flex', alignItems: 'center', gap: 4,
+                      color: selectedChat.type === 'dm' && onlineUsers[selectedChat.otherUser?.id] ? '#22c55e' : '#6b7280',
+                      fontWeight: selectedChat.type === 'dm' && onlineUsers[selectedChat.otherUser?.id] ? 600 : 400,
+                    }}>
+                      {selectedChat.type === 'dm' && onlineUsers[selectedChat.otherUser?.id] && (
+                        <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+                      )}
+                      {selectedChat.type === 'group'
+                        ? `${selectedChat.memberCount} members`
+                        : onlineUsers[selectedChat.otherUser?.id] ? 'Active now' : `@${selectedChat.username}`}
                     </p>
                   </div>
 
@@ -465,13 +538,22 @@ export default function Messages() {
                         )}
                         <div style={{ maxWidth: '70%', padding: '10px 14px', borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px', background: isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)', border: isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)' }}>
                           <p style={{ fontSize: 13, color: 'white', margin: 0, lineHeight: 1.5 }}>{msg.content}</p>
-                          <p style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563', margin: '4px 0 0', textAlign: 'right' }}>
-                            {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                          </p>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
+                            <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
+                              {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </span>
+                            {isMe && selectedChat.type === 'dm' && (
+                              <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
+                                title={(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? 'Seen' : 'Sent'}>
+                                {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     );
                   })}
+                  <div ref={messagesEndRef} />
                 </div>
 
                 {/* Message input */}
