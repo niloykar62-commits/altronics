@@ -65,6 +65,7 @@ export default function Messages() {
   }, [msgMenuOpenId]);
 
   useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) { router.push('/login'); return; }
       setUser(firebaseUser);
       const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
