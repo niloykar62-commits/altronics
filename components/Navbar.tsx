@@ -3,7 +3,7 @@
 import { useRouter, usePathname } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
@@ -11,26 +11,49 @@ export default function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [profile, setProfile] = useState<any>(null);
+  const [uid, setUid] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) await loadUnreadCount(firebaseUser.uid);
+      if (firebaseUser) {
+        setUid(firebaseUser.uid);
+        await loadUnreadCount(firebaseUser.uid);
+        await loadProfile(firebaseUser.uid);
+        // Mark user as active when they open the app
+        try {
+          await updateDoc(doc(db, 'users', firebaseUser.uid), { lastSeen: serverTimestamp() });
+        } catch (_) {}
+      }
     });
     return () => unsubscribe();
   }, []);
 
-  const loadUnreadCount = async (uid: string) => {
+  const loadProfile = async (userId: string) => {
     try {
-      const q = query(collection(db, 'notifications'), where('toUserId', '==', uid), where('read', '==', false));
+      const snap = await getDoc(doc(db, 'users', userId));
+      if (snap.exists()) setProfile(snap.data());
+    } catch (err) { console.error(err); }
+  };
+
+  const loadUnreadCount = async (userId: string) => {
+    try {
+      const q = query(collection(db, 'notifications'), where('toUserId', '==', userId), where('read', '==', false));
       const snapshot = await getDocs(q);
       setUnreadCount(snapshot.size);
     } catch (err) { console.error(err); }
   };
 
   const handleLogout = async () => {
+    if (uid) {
+      try { await updateDoc(doc(db, 'users', uid), { lastSeen: serverTimestamp() }); } catch (_) {}
+    }
     await signOut(auth);
     router.push('/login');
   };
+
+  const initials = profile?.fullName?.[0]?.toUpperCase() || 'U';
+  const isActiveVisible = profile?.activeStatus !== false;
 
   const navItems = [
     { href: '/feed', icon: '🏠', label: 'Home' },
@@ -38,7 +61,7 @@ export default function Navbar() {
     { href: '/search', icon: '🔍', label: 'Search' },
     { href: '/messages', icon: '💬', label: 'DMs' },
     { href: '/notifications', icon: '🔔', label: 'Alerts', badge: unreadCount },
-    { href: '/profile', icon: '👤', label: 'Profile' },
+    { href: '/profile', icon: null, label: 'Profile', isAvatar: true },
   ];
 
   return (
@@ -54,12 +77,28 @@ export default function Navbar() {
           <span style={{ fontSize: 22, fontWeight: 900, letterSpacing: -1, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             ALTRONICS
           </span>
-          <button
-            onClick={handleLogout}
-            style={{ padding: '6px 16px', borderRadius: 20, background: 'rgba(239,68,68,0.1)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}
-          >
-            Log out
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Mini avatar in header */}
+            <div style={{ position: 'relative', width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', border: '1.5px solid rgba(139,92,246,0.4)', flexShrink: 0 }}>
+              {profile?.photoURL ? (
+                <img src={profile.photoURL} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white' }}>
+                  {initials}
+                </div>
+              )}
+              {/* Active dot — only shown if activeStatus is on */}
+              {isActiveVisible && (
+                <span style={{ position: 'absolute', bottom: 0, right: 0, width: 9, height: 9, borderRadius: '50%', background: '#22c55e', border: '1.5px solid #0a0a0f' }} />
+              )}
+            </div>
+            <button
+              onClick={handleLogout}
+              style={{ padding: '6px 16px', borderRadius: 20, background: 'rgba(239,68,68,0.1)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}
+            >
+              Log out
+            </button>
+          </div>
         </div>
       </header>
 
@@ -73,12 +112,27 @@ export default function Navbar() {
         display: pathname === '/messages' ? 'none' : 'block',
       }}>
         <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
-          {navItems.map(({ href, icon, label, badge }) => {
+          {navItems.map(({ href, icon, label, badge, isAvatar }) => {
             const isActive = pathname === href;
             return (
               <Link key={href} href={href} style={{ textDecoration: 'none' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 12px', borderRadius: 14, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent', transition: 'all 0.2s', position: 'relative', cursor: 'pointer' }}>
-                  <span style={{ fontSize: 20 }}>{icon}</span>
+                  {isAvatar ? (
+                    <div style={{ position: 'relative', width: 24, height: 24, borderRadius: '50%', overflow: 'hidden', border: isActive ? '1.5px solid #a78bfa' : '1.5px solid rgba(139,92,246,0.3)' }}>
+                      {profile?.photoURL ? (
+                        <img src={profile.photoURL} alt="me" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'white' }}>
+                          {initials}
+                        </div>
+                      )}
+                      {isActiveVisible && (
+                        <span style={{ position: 'absolute', bottom: 0, right: 0, width: 7, height: 7, borderRadius: '50%', background: '#22c55e', border: '1px solid #0a0a0f' }} />
+                      )}
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 20 }}>{icon}</span>
+                  )}
                   <span style={{ fontSize: 9, fontWeight: 600, color: isActive ? '#a78bfa' : '#6b7280' }}>{label}</span>
                   {badge && badge > 0 && (
                     <span style={{ position: 'absolute', top: 2, right: 8, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', color: 'white', fontSize: 9, fontWeight: 700, width: 15, height: 15, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
