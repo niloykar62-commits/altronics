@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, getDocs, orderBy, query, serverTimestamp, doc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc } from 'firebase/firestore';
-import Image from 'next/image';
 import Navbar from '@/components/Navbar';
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
@@ -241,9 +240,8 @@ export default function Feed() {
               />
               {imagePreview && (
                 <div style={{ position: 'relative', marginBottom: 12, borderRadius: 16, overflow: 'hidden' }}>
-                  <div style={{ position: 'relative', width: '100%', height: 200 }}>
-                    <Image src={imagePreview} alt="Image preview" fill sizes="600px" style={{ objectFit: 'cover' }} />
-                  </div>
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={imagePreview!} alt="Preview" style={{ width: '100%', maxHeight: 200, objectFit: 'cover' as const, display: 'block' }} />
                   <button type="button" aria-label="Remove image" onClick={() => { setImage(null); setImagePreview(null); }}
                     style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%', background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                 </div>
@@ -324,16 +322,13 @@ export default function Feed() {
                     <>
                       {post.content && <p style={{ fontSize: 14, color: '#d1d5db', lineHeight: 1.6, marginBottom: 12 }}>{post.content}</p>}
                       {post.imageUrl && (
-                        <div style={{ position: 'relative', width: '100%', borderRadius: 16, overflow: 'hidden', marginBottom: 12, border: '0.5px solid rgba(139,92,246,0.1)', aspectRatio: '16/9' }}>
-                          <Image
-                            src={post.imageUrl}
-                            alt="Post image"
-                            fill
-                            sizes="(max-width: 600px) 100vw, 600px"
-                            style={{ objectFit: 'cover' }}
-                            onError={() => { console.error('Image failed to load:', post.imageUrl); }}
-                          />
-                        </div>
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={post.imageUrl}
+                          alt="Post"
+                          style={{ width: '100%', borderRadius: 16, maxHeight: 400, objectFit: 'cover' as const, marginBottom: 12, border: '0.5px solid rgba(139,92,246,0.1)', display: 'block' }}
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                        />
                       )}
                     </>
                   )}
