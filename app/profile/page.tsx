@@ -228,12 +228,12 @@ export default function Profile() {
                       <span style={{ fontSize: 12, color: 'white', fontWeight: 600 }}>Change</span>
                     </div>
                   )}
-                </div>
+                </button>
                 {/* Camera badge */}
-                <div onClick={() => !avatarUploading && avatarInputRef.current?.click()}
-                  style={{ position: 'absolute', bottom: 0, right: 0, width: 24, height: 24, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, cursor: 'pointer', border: '2px solid #0a0a0f', zIndex: 2 }}>
+                <button type="button" aria-label="Upload profile picture" onClick={() => !avatarUploading && avatarInputRef.current?.click()}
+                  style={{ position: 'absolute', bottom: 0, right: 0, width: 24, height: 24, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, cursor: 'pointer', border: '2px solid #0a0a0f', zIndex: 2, padding: 0 }}>
                   📷
-                </div>
+                </button>
               </div>
 
               {/* Stats */}
