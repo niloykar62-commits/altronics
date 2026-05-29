@@ -46,7 +46,7 @@ function MessagesContent() {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);   // main emoji picker in input
   const [emojiPickerTab, setEmojiPickerTab] = useState(0);          // tab index in picker
   const [reactingToMsgId, setReactingToMsgId] = useState<string | null>(null); // msg getting reacted to
-  const router = useRouter();
+  const { push } = useRouter();
   const searchParams = useSearchParams();
 
   // ── Image upload state ────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ function MessagesContent() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) { router.push('/login'); return; }
+      if (!firebaseUser) { push('/login'); return; }
       setUser(firebaseUser);
       const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
       if (profileDoc.exists()) setUserProfile(profileDoc.data());
@@ -74,6 +74,7 @@ function MessagesContent() {
   }, []);
 
   // ── Auto-open chat from notification deep-link (?dm=uid or ?group=groupId) ──
+  // eslint-disable-next-line react-compiler/react-compiler
   useEffect(() => {
     if (pageLoading) return;
     const dmUid = searchParams.get('dm');
@@ -111,7 +112,8 @@ function MessagesContent() {
 
   // ── Listen to online status of all users in real-time ────────────────────
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'presence'), (snap) => {
+    const presenceCol = collection(db, 'presence');
+    const unsub = onSnapshot(presenceCol, (snap) => {
       const map: Record<string, boolean> = {};
       snap.docs.forEach((d) => { map[d.id] = d.data().online === true; });
       setOnlineUsers(map);
@@ -599,7 +601,7 @@ function MessagesContent() {
     const parts = text.split(/(#[a-zA-Z0-9_]+)/g);
     return parts.map((part, i) =>
       part.startsWith('#')
-        ? <span key={i} style={{ color: '#a78bfa', fontWeight: 700 }}>{part}</span>
+        ? <span key={i} className="mention-highlight">{part}</span>
         : <span key={i}>{part}</span>
     );
   };
@@ -664,7 +666,26 @@ function MessagesContent() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .msg-btn { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; transition: opacity 0.15s; opacity: 0; }
+        .msg-btn-reply { background: rgba(139,92,246,0.15); border: 0.5px solid rgba(139,92,246,0.3); color: #a78bfa; font-size: 13px; }
+        .msg-btn-react { background: rgba(251,191,36,0.12); border: 0.5px solid rgba(251,191,36,0.3); font-size: 13px; }
+        .nav-link { text-decoration: none; }
+        .nav-item { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 12px; border-radius: 14px; cursor: pointer; }
+        .nav-item-active { background: rgba(139,92,246,0.15); }
+        .nav-dot { width: 4px; height: 4px; border-radius: 50%; background: #a78bfa; }
+        .user-avatar { display: flex; align-items: center; justify-content: center; font-weight: 700; color: #a78bfa; flex-shrink: 0; }
+        .online-dot { position: absolute; bottom: 1px; right: 1px; width: 11px; height: 11px; border-radius: 50%; background: #22c55e; border: 2px solid #0a0a0f; }
+        .msg-bubble-me { background: linear-gradient(135deg,#8b5cf6,#3b82f6); }
+        .msg-bubble-them { background: rgba(255,255,255,0.06); border: 0.5px solid rgba(255,255,255,0.08); }
+        .mention-highlight { color: #a78bfa; font-weight: 700; }
+        .input-base { width: 100%; padding: 10px 14px; background: rgba(139,92,246,0.08); border: 0.5px solid rgba(139,92,246,0.2); border-radius: 12px; color: #f3f4f6; font-size: 13px; font-family: Inter,sans-serif; outline: none; }
+        .page-loading { min-height: 100vh; background: #0a0a0f; display: flex; align-items: center; justify-content: center; }
+        .reply-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: rgba(139,92,246,0.08); border-bottom: 0.5px solid rgba(139,92,246,0.15); }
+        .reply-border { flex: 1; border-left: 3px solid #a78bfa; padding-left: 10px; }
+        .emoji-reaction-btn { display: flex; align-items: center; gap: 3px; padding: 3px 8px; border-radius: 20px; cursor: pointer; transition: background 0.15s, border 0.15s; }
+      `}</style>
       <Navbar />
 
       {/* Create Group Modal */}
@@ -673,14 +694,14 @@ function MessagesContent() {
           <div style={{ width: '100%', maxWidth: 420, background: '#111118', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: 24, padding: 28 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
               <h2 style={{ fontSize: 18, fontWeight: 800, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>Create Group</h2>
-              <button onClick={() => setShowCreateGroup(false)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 22, cursor: 'pointer' }}>✕</button>
+              <button type="button" onClick={() => setShowCreateGroup(false)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 22, cursor: 'pointer' }}>✕</button>
             </div>
             <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Group Name</label>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#9ca3af', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Group Name</label>
               <input placeholder="e.g. Dev Squad..." value={groupName} onChange={(e) => setGroupName(e.target.value)} style={inputStyle} />
             </div>
             <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#9ca3af', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#9ca3af', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                 Add Members ({selectedMembers.length} selected)
               </label>
               <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -688,13 +709,13 @@ function MessagesContent() {
                   const isSelected = selectedMembers.includes(u.id);
                   return (
                     <div key={u.id} onClick={() => toggleMember(u.id)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12, background: isSelected ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.03)', border: isSelected ? '0.5px solid rgba(139,92,246,0.4)' : '0.5px solid rgba(255,255,255,0.06)', cursor: 'pointer', transition: 'all 0.2s' }}>
+                      style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 12, background: isSelected ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.03)', border: isSelected ? '0.5px solid rgba(139,92,246,0.4)' : '0.5px solid rgba(255,255,255,0.06)', cursor: 'pointer', transition: 'background 0.2s, border 0.2s' }}>
                       <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, color: '#a78bfa', flexShrink: 0 }}>
                         {u.fullName?.[0]?.toUpperCase() || 'U'}
                       </div>
                       <div style={{ flex: 1 }}>
                         <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>{u.fullName}</p>
-                        <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>@{u.username}</p>
+                        <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>@{u.username}</p>
                       </div>
                       <div style={{ width: 22, height: 22, borderRadius: '50%', background: isSelected ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'white', flexShrink: 0 }}>
                         {isSelected ? '✓' : ''}
@@ -704,7 +725,7 @@ function MessagesContent() {
                 })}
               </div>
             </div>
-            <button onClick={createGroup} disabled={creating}
+            <button type="button" onClick={createGroup} disabled={creating}
               style={{ width: '100%', padding: 14, borderRadius: 14, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 14, fontWeight: 700, cursor: creating ? 'not-allowed' : 'pointer', opacity: creating ? 0.7 : 1, fontFamily: 'Inter,sans-serif' }}>
               {creating ? 'Creating...' : `Create Group${selectedMembers.length > 0 ? ` (${selectedMembers.length + 1} members)` : ''}`}
             </button>
@@ -731,14 +752,14 @@ function MessagesContent() {
             <div style={{ padding: '16px 16px 12px', borderBottom: '0.5px solid rgba(139,92,246,0.1)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <h1 style={{ fontSize: 18, fontWeight: 800, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>Messages</h1>
-                <button onClick={() => setShowCreateGroup(true)}
-                  style={{ padding: '5px 12px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                <button type="button" onClick={() => setShowCreateGroup(true)}
+                  style={{ padding: '5px 12px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                   + Group
                 </button>
               </div>
               <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', borderRadius: 10, padding: 3 }}>
                 {(['dms', 'groups'] as const).map((tab) => (
-                  <button key={tab} onClick={() => setActiveTab(tab)}
+                  <button type="button" key={tab} onClick={() => setActiveTab(tab)}
                     style={{ flex: 1, padding: '7px 0', borderRadius: 8, background: activeTab === tab ? 'rgba(139,92,246,0.2)' : 'transparent', border: 'none', color: activeTab === tab ? '#a78bfa' : '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                     {tab === 'dms' ? '💬 DMs' : '👥 Groups'}
                   </button>
@@ -771,7 +792,7 @@ function MessagesContent() {
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>{u.fullName}</p>
-                      <p style={{ fontSize: 11, color: onlineUsers[u.id] ? '#22c55e' : '#6b7280', margin: 0, fontWeight: onlineUsers[u.id] ? 600 : 400 }}>
+                      <p style={{ fontSize: 12, color: onlineUsers[u.id] ? '#22c55e' : '#6b7280', margin: 0, fontWeight: onlineUsers[u.id] ? 600 : 400 }}>
                         {onlineUsers[u.id] ? '● Active now' : `@${u.username}`}
                       </p>
                     </div>
@@ -794,7 +815,7 @@ function MessagesContent() {
                     </div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>{group.name}</p>
-                      <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>{group.members?.length || 0} members</p>
+                      <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>{group.members?.length || 0} members</p>
                     </div>
                   </div>
                 ))
@@ -816,7 +837,7 @@ function MessagesContent() {
                 {/* Chat header with back button + call buttons */}
                 <div style={{ padding: '12px 16px', borderBottom: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', gap: 10 }}>
                   {/* Back button */}
-                  <button onClick={() => { setSelectedChat(null); setInCall(false); setMessages([]); }}
+                  <button type="button" onClick={() => { setSelectedChat(null); setInCall(false); setMessages([]); }}
                     style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.25)', color: '#a78bfa', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, lineHeight: 1 }}>
                     ‹
                   </button>
@@ -825,7 +846,7 @@ function MessagesContent() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <p style={{ fontSize: 14, fontWeight: 700, color: '#f3f4f6', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedChat.name}</p>
-                    <p style={{ fontSize: 11, margin: 0, display: 'flex', alignItems: 'center', gap: 4,
+                    <p style={{ fontSize: 12, margin: 0, display: 'flex', alignItems: 'center', gap: 4,
                       color: selectedChat.type === 'dm' && onlineUsers[selectedChat.otherUser?.id] ? '#22c55e' : '#6b7280',
                       fontWeight: selectedChat.type === 'dm' && onlineUsers[selectedChat.otherUser?.id] ? 600 : 400,
                     }}>
@@ -840,15 +861,15 @@ function MessagesContent() {
 
                   {/* Call buttons */}
                   <div style={{ display: 'flex', gap: 6 }}>
-                    <button onClick={() => startCall('voice')}
-                      style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', border: '0.5px solid rgba(52,211,153,0.3)', color: '#34d399', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+                    <button type="button" onClick={() => startCall('voice')}
+                      style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(52,211,153,0.15)', border: '0.5px solid rgba(52,211,153,0.3)', color: '#34d399', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, border 0.2s' }}
                       title="Voice call"
                       onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(52,211,153,0.25)')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(52,211,153,0.15)')}>
                       📞
                     </button>
-                    <button onClick={() => startCall('video')}
-                      style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+                    <button type="button" onClick={() => startCall('video')}
+                      style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, border 0.2s' }}
                       title="Video call"
                       onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.25)')}
                       onMouseLeave={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.15)')}>
@@ -856,9 +877,9 @@ function MessagesContent() {
                     </button>
                     {/* Group info button */}
                     {selectedChat.type === 'group' && (
-                      <button onClick={() => setShowGroupInfo(true)}
-                        style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(251,191,36,0.15)', border: '0.5px solid rgba(251,191,36,0.3)', color: '#fbbf24', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
-                        title="Group info">
+                      <button type="button" onClick={() => setShowGroupInfo(true)}
+                        style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(251,191,36,0.15)', border: '0.5px solid rgba(251,191,36,0.3)', color: '#fbbf24', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s, border 0.2s' }}
+                        aria-label="Group info">
                         ⚙
                       </button>
                     )}
@@ -870,7 +891,7 @@ function MessagesContent() {
                   <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 50, display: 'flex', flexDirection: 'column', background: '#0a0a0f' }}>
                     {/* Panel header */}
                     <div style={{ padding: '14px 16px', borderBottom: '0.5px solid rgba(139,92,246,0.15)', display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <button onClick={() => setShowGroupInfo(false)}
+                      <button type="button" onClick={() => setShowGroupInfo(false)}
                         style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.25)', color: '#a78bfa', fontSize: 18, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         ‹
                       </button>
@@ -894,14 +915,14 @@ function MessagesContent() {
                                   style={{ flex: 1, padding: '8px 14px', borderRadius: 12, background: 'rgba(139,92,246,0.1)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#f3f4f6', fontSize: 14, fontWeight: 700, fontFamily: 'Inter,sans-serif', outline: 'none' }}
                                   autoFocus
                                 />
-                                <button onClick={renameGroup} style={{ padding: '8px 14px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Save</button>
-                                <button onClick={() => setEditingGroupName(false)} style={{ padding: '8px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>✕</button>
+                                <button type="button" onClick={renameGroup} style={{ padding: '8px 14px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Save</button>
+                                <button type="button" onClick={() => setEditingGroupName(false)} style={{ padding: '8px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: 'none', color: '#9ca3af', fontSize: 12, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>✕</button>
                               </div>
                             ) : (
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 <p style={{ fontSize: 18, fontWeight: 800, color: '#f3f4f6', margin: 0 }}>{groupInfo.name}</p>
                                 {isGroupAdmin() && (
-                                  <button onClick={() => { setNewGroupName(groupInfo.name); setEditingGroupName(true); }}
+                                  <button type="button" onClick={() => { setNewGroupName(groupInfo.name); setEditingGroupName(true); }}
                                     style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#6b7280', padding: 4 }} title="Rename group">✏️</button>
                                 )}
                               </div>
@@ -912,7 +933,7 @@ function MessagesContent() {
                           {/* Add member (admin only) */}
                           {isGroupAdmin() && (
                             <div style={{ padding: '16px 16px 0' }}>
-                              <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Add Members</p>
+                              <p style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>Add Members</p>
                               <input
                                 placeholder="Search users to add..."
                                 value={addMemberSearch}
@@ -932,10 +953,10 @@ function MessagesContent() {
                                         </div>
                                         <div style={{ flex: 1, minWidth: 0 }}>
                                           <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>{u.fullName}</p>
-                                          <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>@{u.username}</p>
+                                          <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>@{u.username}</p>
                                         </div>
-                                        <button onClick={() => { addMemberToGroup(u.id); setAddMemberSearch(''); }}
-                                          style={{ padding: '6px 12px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 11, fontWeight: 700, cursor: 'pointer', flexShrink: 0, fontFamily: 'Inter,sans-serif' }}>
+                                        <button type="button" onClick={() => { addMemberToGroup(u.id); setAddMemberSearch(''); }}
+                                          style={{ padding: '6px 12px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', flexShrink: 0, fontFamily: 'Inter,sans-serif' }}>
                                           + Add
                                         </button>
                                       </div>
@@ -947,7 +968,7 @@ function MessagesContent() {
 
                           {/* Member list */}
                           <div style={{ padding: '16px 16px 0' }}>
-                            <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
+                            <p style={{ fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
                               Members ({groupInfo.memberProfiles?.length || 0})
                             </p>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -973,27 +994,27 @@ function MessagesContent() {
                                           {member.fullName}{isMe ? ' (You)' : ''}
                                         </p>
                                         {isOwner && (
-                                          <span style={{ fontSize: 9, fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,0.15)', border: '0.5px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '1px 6px' }}>Owner</span>
+                                          <span style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', background: 'rgba(251,191,36,0.15)', border: '0.5px solid rgba(251,191,36,0.3)', borderRadius: 6, padding: '1px 6px' }}>Owner</span>
                                         )}
                                         {!isOwner && isMemberAdmin && (
-                                          <span style={{ fontSize: 9, fontWeight: 700, color: '#a78bfa', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: 6, padding: '1px 6px' }}>Admin</span>
+                                          <span style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: 6, padding: '1px 6px' }}>Admin</span>
                                         )}
                                       </div>
-                                      <p style={{ fontSize: 11, color: onlineUsers[member.id] ? '#22c55e' : '#6b7280', margin: 0, fontWeight: onlineUsers[member.id] ? 600 : 400 }}>
+                                      <p style={{ fontSize: 12, color: onlineUsers[member.id] ? '#22c55e' : '#6b7280', margin: 0, fontWeight: onlineUsers[member.id] ? 600 : 400 }}>
                                         {onlineUsers[member.id] ? '● Active now' : `@${member.username}`}
                                       </p>
                                     </div>
                                     {/* Admin actions */}
                                     {isGroupAdmin() && !isMe && !isOwner && (
                                       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                                        <button onClick={() => toggleAdmin(member.id)}
+                                        <button type="button" onClick={() => toggleAdmin(member.id)}
                                           title={isMemberAdmin ? 'Remove admin' : 'Make admin'}
-                                          style={{ padding: '5px 10px', borderRadius: 8, background: isMemberAdmin ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.06)', border: isMemberAdmin ? '0.5px solid rgba(139,92,246,0.4)' : '0.5px solid rgba(255,255,255,0.1)', color: isMemberAdmin ? '#a78bfa' : '#9ca3af', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                                          style={{ padding: '5px 10px', borderRadius: 8, background: isMemberAdmin ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.06)', border: isMemberAdmin ? '0.5px solid rgba(139,92,246,0.4)' : '0.5px solid rgba(255,255,255,0.1)', color: isMemberAdmin ? '#a78bfa' : '#9ca3af', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                                           {isMemberAdmin ? '★ Admin' : '☆ Admin'}
                                         </button>
-                                        <button onClick={() => removeMember(member.id)}
+                                        <button type="button" onClick={() => removeMember(member.id)}
                                           title="Remove from group"
-                                          style={{ padding: '5px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                                          style={{ padding: '5px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                                           Remove
                                         </button>
                                       </div>
@@ -1006,7 +1027,7 @@ function MessagesContent() {
 
                           {/* Leave group */}
                           <div style={{ padding: '20px 16px' }}>
-                            <button onClick={leaveGroup}
+                            <button type="button" onClick={leaveGroup}
                               style={{ width: '100%', padding: '13px', borderRadius: 14, background: 'rgba(239,68,68,0.08)', border: '0.5px solid rgba(239,68,68,0.25)', color: '#f87171', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                               🚪 Leave Group
                             </button>
@@ -1028,7 +1049,7 @@ function MessagesContent() {
                       <span style={{ fontSize: 12, fontWeight: 600, color: '#a78bfa' }}>
                         {callType === 'video' ? '🎥 Video Call' : '📞 Voice Call'} · {selectedChat.name}
                       </span>
-                      <button onClick={endCall}
+                      <button type="button" onClick={endCall}
                         style={{ padding: '5px 14px', borderRadius: 16, background: 'rgba(239,68,68,0.2)', border: '0.5px solid rgba(239,68,68,0.4)', color: '#f87171', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                         End Call
                       </button>
@@ -1056,7 +1077,7 @@ function MessagesContent() {
                               {isMe ? 'You' : `@${msg.senderUsername}`} started a {msg.callType} call
                             </span>
                             <a href={`https://meet.jit.si/${msg.callRoomId}`} target="_blank" rel="noreferrer"
-                              style={{ fontSize: 11, color: '#60a5fa', textDecoration: 'underline', cursor: 'pointer' }}>
+                              style={{ fontSize: 12, color: '#60a5fa', textDecoration: 'underline', cursor: 'pointer' }}>
                               Join
                             </a>
                           </div>
@@ -1079,7 +1100,7 @@ function MessagesContent() {
                       >
                         {/* Sender name in group */}
                         {!isMe && selectedChat.type === 'group' && (
-                          <span style={{ fontSize: 10, color: '#a78bfa', fontWeight: 600, marginBottom: 3, marginLeft: 4 }}>
+                          <span style={{ fontSize: 12, color: '#a78bfa', fontWeight: 600, marginBottom: 3, marginLeft: 4 }}>
                             #{msg.senderUsername}
                           </span>
                         )}
@@ -1090,14 +1111,14 @@ function MessagesContent() {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 4 }}>
                             {/* Reply */}
                             {!msg.deleted && (
-                              <button className="reply-btn"
+                              <button type="button" className="reply-btn"
                                 onClick={() => setReplyingTo(msg)}
                                 style={{ opacity: 0, transition: 'opacity 0.15s', background: 'rgba(139,92,246,0.15)', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#a78bfa', fontSize: 13, flexShrink: 0 }}
                                 title="Reply">↩</button>
                             )}
                             {/* React */}
                             {!msg.deleted && (
-                              <button className="react-btn"
+                              <button type="button" className="react-btn"
                                 onClick={() => setReactingToMsgId(reactingToMsgId === msg.id ? null : msg.id)}
                                 style={{ opacity: 0, transition: 'opacity 0.15s', background: 'rgba(251,191,36,0.12)', border: '0.5px solid rgba(251,191,36,0.3)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, flexShrink: 0 }}
                                 title="React">😊</button>
@@ -1105,7 +1126,7 @@ function MessagesContent() {
                             {/* ⋯ Menu — only my non-deleted text messages */}
                             {isMe && !msg.deleted && (
                               <div className="msg-menu-anchor" style={{ position: 'relative' }}>
-                                <button className="menu-btn"
+                                <button type="button" className="menu-btn"
                                   onClick={() => setMsgMenuOpenId(msgMenuOpenId === msg.id ? null : msg.id)}
                                   style={{ opacity: msgMenuOpenId === msg.id ? 1 : 0, transition: 'opacity 0.15s', background: msgMenuOpenId === msg.id ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.12)', borderRadius: '50%', width: 28, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#9ca3af', fontSize: 15, flexShrink: 0 }}
                                   title="More">⋯</button>
@@ -1116,7 +1137,7 @@ function MessagesContent() {
                                     {/* Edit — only for text messages */}
                                     {msg.type !== 'image' && (
                                       <>
-                                        <button onClick={() => startEdit(msg)}
+                                        <button type="button" onClick={() => startEdit(msg)}
                                           style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: 'transparent', border: 'none', cursor: 'pointer', color: '#e2e8f0', fontSize: 13, fontWeight: 600, fontFamily: 'Inter,sans-serif', textAlign: 'left', transition: 'background 0.12s' }}
                                           onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.12)')}
                                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
@@ -1126,7 +1147,7 @@ function MessagesContent() {
                                       </>
                                     )}
                                     {/* Delete */}
-                                    <button onClick={() => deleteMessage(msg)}
+                                    <button type="button" onClick={() => deleteMessage(msg)}
                                       style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', background: 'transparent', border: 'none', cursor: 'pointer', color: '#f87171', fontSize: 13, fontWeight: 600, fontFamily: 'Inter,sans-serif', textAlign: 'left', transition: 'background 0.12s' }}
                                       onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(239,68,68,0.1)')}
                                       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
@@ -1142,8 +1163,8 @@ function MessagesContent() {
                             {/* Reply preview */}
                             {msg.replyTo && (
                               <div style={{ marginBottom: 4, padding: '6px 10px', borderRadius: '10px 10px 0 0', background: isMe ? 'rgba(0,0,0,0.25)' : 'rgba(139,92,246,0.12)', borderLeft: '3px solid #a78bfa' }}>
-                                <p style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', margin: '0 0 2px' }}>↩ #{msg.replyTo.senderUsername}</p>
-                                <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
+                                <p style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa', margin: '0 0 2px' }}>↩ #{msg.replyTo.senderUsername}</p>
+                                <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
                                   {msg.replyTo.content || '📷 Photo'}
                                 </p>
                               </div>
@@ -1168,16 +1189,16 @@ function MessagesContent() {
                                   style={{ padding: '10px 14px', borderRadius: 14, background: 'rgba(139,92,246,0.12)', border: '1.5px solid rgba(139,92,246,0.5)', color: '#f3f4f6', fontSize: 13, fontFamily: 'Inter,sans-serif', outline: 'none', minWidth: 200 }}
                                 />
                                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                                  <button onClick={cancelEdit}
-                                    style={{ padding: '5px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                                  <button type="button" onClick={cancelEdit}
+                                    style={{ padding: '5px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.07)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
                                     Cancel
                                   </button>
-                                  <button onClick={() => saveEdit(msg)} disabled={!editingContent.trim()}
-                                    style={{ padding: '5px 12px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 11, fontWeight: 700, cursor: editingContent.trim() ? 'pointer' : 'not-allowed', opacity: editingContent.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif' }}>
+                                  <button type="button" onClick={() => saveEdit(msg)} disabled={!editingContent.trim()}
+                                    style={{ padding: '5px 12px', borderRadius: 10, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: editingContent.trim() ? 'pointer' : 'not-allowed', opacity: editingContent.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif' }}>
                                     Save
                                   </button>
                                 </div>
-                                <p style={{ fontSize: 10, color: '#4b5563', margin: 0, textAlign: 'right' }}>Enter to save · Esc to cancel</p>
+                                <p style={{ fontSize: 12, color: '#4b5563', margin: 0, textAlign: 'right' }}>Enter to save · Esc to cancel</p>
                               </div>
                             ) : (
                               /* ── Normal bubble ── */
@@ -1188,11 +1209,11 @@ function MessagesContent() {
                                       onClick={() => window.open(msg.imageUrl, '_blank')}
                                       style={{ display: 'block', maxWidth: 260, maxHeight: 320, width: '100%', borderRadius: 14, cursor: 'zoom-in', objectFit: 'cover' }} />
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, padding: '4px 8px 2px' }}>
-                                      <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
+                                      <span style={{ fontSize: 12, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
                                         {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                       </span>
                                       {isMe && selectedChat.type === 'dm' && (
-                                        <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}>
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}>
                                           {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
                                         </span>
                                       )}
@@ -1202,12 +1223,12 @@ function MessagesContent() {
                                   <>
                                     <p style={{ fontSize: 13, color: 'white', margin: 0, lineHeight: 1.6 }}>{renderContent(msg.content)}</p>
                                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
-                                      {msg.editedAt && <span style={{ fontSize: 9, color: isMe ? 'rgba(255,255,255,0.4)' : '#4b5563', fontStyle: 'italic' }}>edited</span>}
-                                      <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
+                                      {msg.editedAt && <span style={{ fontSize: 12, color: isMe ? 'rgba(255,255,255,0.4)' : '#4b5563', fontStyle: 'italic' }}>edited</span>}
+                                      <span style={{ fontSize: 12, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
                                         {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                       </span>
                                       {isMe && selectedChat.type === 'dm' && (
-                                        <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
                                           title={(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? 'Seen' : 'Sent'}>
                                           {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
                                         </span>
@@ -1227,11 +1248,12 @@ function MessagesContent() {
                                     const iReacted = uids.includes(user.uid);
                                     const collName = selectedChat.type === 'group' ? 'groups' : 'conversations';
                                     return (
-                                      <button key={emoji}
+                                      <button type="button" key={emoji}
                                         onClick={() => toggleReaction(msg.id, emoji, collName)}
-                                        style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', borderRadius: 20, background: iReacted ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.06)', border: iReacted ? '0.5px solid rgba(139,92,246,0.5)' : '0.5px solid rgba(255,255,255,0.1)', cursor: 'pointer', transition: 'all 0.15s' }}>
+                                        aria-label={`${emoji} reaction, ${uids.length} ${uids.length === 1 ? 'person' : 'people'}`}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', borderRadius: 20, background: iReacted ? 'rgba(139,92,246,0.25)' : 'rgba(255,255,255,0.06)', border: iReacted ? '0.5px solid rgba(139,92,246,0.5)' : '0.5px solid rgba(255,255,255,0.1)', cursor: 'pointer', transition: 'background 0.15s, border 0.15s' }}>
                                         <span style={{ fontSize: 14 }}>{emoji}</span>
-                                        <span style={{ fontSize: 11, fontWeight: 700, color: iReacted ? '#a78bfa' : '#9ca3af' }}>{uids.length}</span>
+                                        <span style={{ fontSize: 12, fontWeight: 700, color: iReacted ? '#a78bfa' : '#9ca3af' }}>{uids.length}</span>
                                       </button>
                                     );
                                   })}
@@ -1244,8 +1266,9 @@ function MessagesContent() {
                         {reactingToMsgId === msg.id && (
                           <div style={{ position: 'absolute', [isMe ? 'right' : 'left']: 40, bottom: '100%', marginBottom: 6, zIndex: 50, background: '#1a1a2e', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: 20, padding: '6px 10px', display: 'flex', gap: 4, boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}>
                             {QUICK_REACTIONS.map((emoji) => (
-                              <button key={emoji}
+                              <button type="button" key={emoji}
                                 onClick={() => toggleReaction(msg.id, emoji, selectedChat.type === 'group' ? 'groups' : 'conversations')}
+                                aria-label={`React with ${emoji}`}
                                 style={{ fontSize: 20, background: 'none', border: 'none', cursor: 'pointer', padding: '2px 3px', borderRadius: 8, transition: 'transform 0.1s' }}
                                 onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.35)')}
                                 onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1)')}>
@@ -1267,14 +1290,14 @@ function MessagesContent() {
                   {replyingTo && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', background: 'rgba(139,92,246,0.08)', borderBottom: '0.5px solid rgba(139,92,246,0.15)' }}>
                       <div style={{ flex: 1, borderLeft: '3px solid #a78bfa', paddingLeft: 10 }}>
-                        <p style={{ fontSize: 10, fontWeight: 700, color: '#a78bfa', margin: '0 0 2px' }}>
+                        <p style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa', margin: '0 0 2px' }}>
                           ↩ Replying to #{replyingTo.senderUsername}
                         </p>
                         <p style={{ fontSize: 12, color: '#9ca3af', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 260 }}>
                           {replyingTo.content}
                         </p>
                       </div>
-                      <button onClick={() => setReplyingTo(null)}
+                      <button type="button" onClick={() => setReplyingTo(null)}
                         style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 18, cursor: 'pointer', lineHeight: 1, flexShrink: 0 }}>✕</button>
                     </div>
                   )}
@@ -1298,7 +1321,7 @@ function MessagesContent() {
                           </div>
                           <div>
                             <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', margin: 0 }}>{u.fullName}</p>
-                            <p style={{ fontSize: 11, color: '#a78bfa', margin: 0 }}>#{u.username}</p>
+                            <p style={{ fontSize: 12, color: '#a78bfa', margin: 0 }}>#{u.username}</p>
                           </div>
                         </div>
                       ))}
@@ -1318,15 +1341,15 @@ function MessagesContent() {
                       </div>
                       <div style={{ flex: 1 }}>
                         <p style={{ fontSize: 12, fontWeight: 600, color: '#f3f4f6', margin: '0 0 2px' }}>📷 Photo ready to send</p>
-                        <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>
+                        <p style={{ fontSize: 12, color: '#6b7280', margin: 0 }}>
                           {(imagePreview.file.size / 1024).toFixed(0)} KB · {imagePreview.file.name.slice(0, 28)}
                         </p>
                       </div>
-                      <button onClick={sendImage} disabled={imageUploading}
+                      <button type="button" onClick={sendImage} disabled={imageUploading}
                         style={{ padding: '8px 16px', borderRadius: 12, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: imageUploading ? 'not-allowed' : 'pointer', opacity: imageUploading ? 0.6 : 1, fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
                         {imageUploading ? 'Sending...' : 'Send'}
                       </button>
-                      <button onClick={cancelImagePreview} disabled={imageUploading}
+                      <button type="button" onClick={cancelImagePreview} disabled={imageUploading}
                         style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                         ✕
                       </button>
@@ -1344,15 +1367,15 @@ function MessagesContent() {
                       style={{ display: 'none' }}
                     />
                     {/* 📷 Image button */}
-                    <button
+                    <button type="button"
                       onClick={() => fileInputRef.current?.click()}
                       disabled={imageUploading}
-                      style={{ width: 36, height: 36, borderRadius: '50%', background: imagePreview ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.1)', border: imagePreview ? '0.5px solid rgba(139,92,246,0.5)' : '0.5px solid rgba(139,92,246,0.25)', fontSize: 17, cursor: imageUploading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s' }}
-                      title="Send image">
+                      style={{ width: 36, height: 36, borderRadius: '50%', background: imagePreview ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.1)', border: imagePreview ? '0.5px solid rgba(139,92,246,0.5)' : '0.5px solid rgba(139,92,246,0.25)', fontSize: 17, cursor: imageUploading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.15s, border 0.15s' }}
+                      aria-label="Send image">
                       📷
                     </button>
                     {/* # mention trigger button */}
-                    <button
+                    <button type="button"
                       onClick={() => {
                         const val = newMessage;
                         const needsSpace = val.length > 0 && !val.endsWith(' ');
@@ -1361,7 +1384,7 @@ function MessagesContent() {
                         setTimeout(() => inputRef.current?.focus(), 0);
                       }}
                       style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 15, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-                      title="Mention someone">
+                      aria-label="Mention someone">
                       #
                     </button>
                     <input
@@ -1375,7 +1398,7 @@ function MessagesContent() {
                       }}
                       style={{ ...inputStyle, flex: 1, borderRadius: 24, padding: '10px 16px' }}
                     />
-                    <button onClick={sendMessage} disabled={!newMessage.trim()}
+                    <button type="button" onClick={sendMessage} disabled={!newMessage.trim()}
                       style={{ padding: '10px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: newMessage.trim() ? 'pointer' : 'not-allowed', opacity: newMessage.trim() ? 1 : 0.5, fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
                       Send
                     </button>
@@ -1390,15 +1413,15 @@ function MessagesContent() {
                 <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
                   <div style={{ textAlign: 'center', padding: '12px 20px', borderRadius: 16, background: 'rgba(52,211,153,0.08)', border: '0.5px solid rgba(52,211,153,0.2)' }}>
                     <p style={{ fontSize: 24, margin: '0 0 4px' }}>📞</p>
-                    <p style={{ fontSize: 11, color: '#34d399', fontWeight: 600, margin: 0 }}>Voice Calls</p>
+                    <p style={{ fontSize: 12, color: '#34d399', fontWeight: 600, margin: 0 }}>Voice Calls</p>
                   </div>
                   <div style={{ textAlign: 'center', padding: '12px 20px', borderRadius: 16, background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)' }}>
                     <p style={{ fontSize: 24, margin: '0 0 4px' }}>🎥</p>
-                    <p style={{ fontSize: 11, color: '#a78bfa', fontWeight: 600, margin: 0 }}>Video Calls</p>
+                    <p style={{ fontSize: 12, color: '#a78bfa', fontWeight: 600, margin: 0 }}>Video Calls</p>
                   </div>
                   <div style={{ textAlign: 'center', padding: '12px 20px', borderRadius: 16, background: 'rgba(59,130,246,0.08)', border: '0.5px solid rgba(59,130,246,0.2)' }}>
                     <p style={{ fontSize: 24, margin: '0 0 4px' }}>👥</p>
-                    <p style={{ fontSize: 11, color: '#60a5fa', fontWeight: 600, margin: 0 }}>Group Chat</p>
+                    <p style={{ fontSize: 12, color: '#60a5fa', fontWeight: 600, margin: 0 }}>Group Chat</p>
                   </div>
                 </div>
               </div>
@@ -1414,7 +1437,7 @@ function MessagesContent() {
         borderTop: selectedChat ? 'none' : '0.5px solid rgba(139,92,246,0.15)',
         padding: selectedChat ? '0' : '8px 0 16px',
         pointerEvents: selectedChat ? 'none' : 'auto',
-        transition: 'all 0.3s',
+        transition: 'background 0.3s, border-top 0.3s, padding 0.3s',
       }}>
         {!selectedChat && (
           <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
@@ -1429,7 +1452,7 @@ function MessagesContent() {
               <Link key={href} href={href} style={{ textDecoration: 'none' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 12px', borderRadius: 14, background: active ? 'rgba(139,92,246,0.15)' : 'transparent', cursor: 'pointer' }}>
                   <span style={{ fontSize: 20 }}>{icon}</span>
-                  <span style={{ fontSize: 9, fontWeight: 600, color: active ? '#a78bfa' : '#6b7280' }}>{label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: active ? '#a78bfa' : '#6b7280' }}>{label}</span>
                   {active && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#a78bfa' }} />}
                 </div>
               </Link>
