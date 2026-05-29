@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, getDocs, orderBy, query, serverTimestamp, doc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc } from 'firebase/firestore';
+import Image from 'next/image';
 import Navbar from '@/components/Navbar';
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
@@ -28,11 +29,11 @@ export default function Feed() {
   const [editContent, setEditContent] = useState('');
   const [repostingId, setRepostingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('foryou');
-  const router = useRouter();
+  const { push } = useRouter();
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) { router.push('/login'); return; }
+      if (!firebaseUser) { push('/login'); return; }
       setUser(firebaseUser);
       try {
         const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
@@ -197,14 +198,15 @@ export default function Feed() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <Navbar />
       <div style={{ maxWidth: 600, margin: '0 auto', paddingBottom: 100 }}>
 
         {/* Tabs */}
         <div style={{ display: 'flex', background: 'rgba(255,255,255,0.02)', borderBottom: '0.5px solid rgba(139,92,246,0.15)', padding: '0 20px' }}>
           {['foryou', 'following', 'trending'].map((tab) => (
-            <button key={tab} onClick={() => setActiveTab(tab)}
-              style={{ flex: 1, padding: '14px 0', background: 'none', border: 'none', color: activeTab === tab ? '#a78bfa' : '#6b7280', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderBottom: activeTab === tab ? '2px solid #8b5cf6' : '2px solid transparent', textTransform: 'capitalize', fontFamily: 'Inter,sans-serif', transition: 'all 0.2s' }}>
+            <button type="button" key={tab} role="tab" aria-selected={activeTab === tab} onClick={() => setActiveTab(tab)}
+              style={{ flex: 1, padding: '14px 0', background: 'none', border: 'none', color: activeTab === tab ? '#a78bfa' : '#6b7280', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderBottom: activeTab === tab ? '2px solid #8b5cf6' : '2px solid transparent', textTransform: 'capitalize', fontFamily: 'Inter,sans-serif', transition: 'color 0.2s, border-color 0.2s' }}>
               {tab === 'foryou' ? 'For You' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
@@ -213,14 +215,14 @@ export default function Feed() {
         {/* Stories Row */}
         <div style={{ display: 'flex', gap: 16, padding: '16px 20px', overflowX: 'auto', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
           {[{ emoji: '➕', name: 'Your Story', add: true }, { emoji: '🎮', name: 'alex_x' }, { emoji: '🎨', name: 'nova' }, { emoji: '🚀', name: 'kai.dev' }, { emoji: '🌙', name: 'luna' }].map((s, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, cursor: 'pointer' }}>
+            <button type="button" key={i} aria-label={`View ${s.name}'s story`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
               <div style={{ width: 56, height: 56, borderRadius: '50%', padding: 2, background: s.add ? 'rgba(139,92,246,0.2)' : 'linear-gradient(135deg,#8b5cf6,#3b82f6)' }}>
                 <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0d0d14', border: '2px solid #0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
                   {s.emoji}
                 </div>
               </div>
-              <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 500 }}>{s.name}</span>
-            </div>
+              <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500 }}>{s.name}</span>
+            </button>
           ))}
         </div>
 
@@ -239,8 +241,10 @@ export default function Feed() {
               />
               {imagePreview && (
                 <div style={{ position: 'relative', marginBottom: 12, borderRadius: 16, overflow: 'hidden' }}>
-                  <img src={imagePreview} alt="Preview" style={{ width: '100%', maxHeight: 200, objectFit: 'cover' }} />
-                  <button onClick={() => { setImage(null); setImagePreview(null); }}
+                  <div style={{ position: 'relative', width: '100%', height: 200 }}>
+                    <Image src={imagePreview} alt="Image preview" fill sizes="600px" style={{ objectFit: 'cover' }} />
+                  </div>
+                  <button type="button" aria-label="Remove image" onClick={() => { setImage(null); setImagePreview(null); }}
                     style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%', background: 'rgba(0,0,0,0.7)', border: 'none', color: 'white', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                 </div>
               )}
@@ -249,7 +253,7 @@ export default function Feed() {
                   📷
                   <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleImageChange} />
                 </label>
-                <button onClick={createPost} disabled={loading || (!content.trim() && !image)}
+                <button type="button" onClick={createPost} disabled={loading || (!content.trim() && !image)}
                   style={{ padding: '8px 24px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: (loading || (!content.trim() && !image)) ? 0.5 : 1, fontFamily: 'Inter,sans-serif', boxShadow: '0 2px 12px rgba(139,92,246,0.3)' }}>
                   {loading ? 'Posting...' : 'Post'}
                 </button>
@@ -273,12 +277,12 @@ export default function Feed() {
           const repostCount = post.reposts?.length || 0;
 
           return (
-            <div key={post.id} style={{ padding: '16px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', transition: 'background 0.2s' }}
+            <article key={post.id} style={{ padding: '16px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', transition: 'background 0.2s' }}
               onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.03)')}
               onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
 
               {post.isRepost && (
-                <p style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4, marginLeft: 52 }}>
+                <p style={{ fontSize: 12, color: '#6b7280', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4, marginLeft: 52 }}>
                   🔄 Reposted from <span style={{ color: '#a78bfa', fontWeight: 600 }}>@{post.originalUsername}</span>
                 </p>
               )}
@@ -292,16 +296,16 @@ export default function Feed() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' as const }}>
                       <span style={{ fontSize: 14, fontWeight: 700, color: '#f3f4f6' }}>{post.fullName}</span>
                       <span style={{ fontSize: 12, color: '#6b7280' }}>@{post.username}</span>
-                      {post.edited && <span style={{ fontSize: 10, color: '#4b5563', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4 }}>edited</span>}
-                      <span style={{ fontSize: 11, color: '#4b5563' }}>
+                      {post.edited && <span style={{ fontSize: 12, color: '#4b5563', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4 }}>edited</span>}
+                      <span style={{ fontSize: 12, color: '#4b5563' }}>
                         {post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : 'now'}
                       </span>
                     </div>
                     {isOwner && editingPost !== post.id && (
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button onClick={() => { setEditingPost(post.id); setEditContent(post.content); }}
+                        <button type="button" aria-label="Edit post" onClick={() => { setEditingPost(post.id); setEditContent(post.content); }}
                           style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '2px 6px', borderRadius: 6 }}>✏️</button>
-                        <button onClick={() => deletePost(post.id)}
+                        <button type="button" aria-label="Delete post" onClick={() => deletePost(post.id)}
                           style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14, padding: '2px 6px', borderRadius: 6 }}>🗑️</button>
                       </div>
                     )}
@@ -312,41 +316,45 @@ export default function Feed() {
                       <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)}
                         style={{ ...inputStyle, minHeight: 80, resize: 'none' as const, marginBottom: 8 }} />
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <button onClick={() => saveEdit(post.id)} style={{ padding: '6px 18px', borderRadius: 16, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Save</button>
-                        <button onClick={() => setEditingPost(null)} style={{ padding: '6px 18px', borderRadius: 16, background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Cancel</button>
+                        <button type="button" onClick={() => saveEdit(post.id)} style={{ padding: '6px 18px', borderRadius: 16, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Save</button>
+                        <button type="button" onClick={() => setEditingPost(null)} style={{ padding: '6px 18px', borderRadius: 16, background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Cancel</button>
                       </div>
                     </div>
                   ) : (
                     <>
                       {post.content && <p style={{ fontSize: 14, color: '#d1d5db', lineHeight: 1.6, marginBottom: 12 }}>{post.content}</p>}
                       {post.imageUrl && (
-                        <img
-                          src={post.imageUrl}
-                          alt="Post"
-                          style={{ width: '100%', borderRadius: 16, maxHeight: 360, objectFit: 'cover', marginBottom: 12, border: '0.5px solid rgba(139,92,246,0.1)' }}
-                          onError={(e) => { console.error('Image failed to load:', post.imageUrl); }}
-                        />
+                        <div style={{ position: 'relative', width: '100%', borderRadius: 16, overflow: 'hidden', marginBottom: 12, border: '0.5px solid rgba(139,92,246,0.1)', aspectRatio: '16/9' }}>
+                          <Image
+                            src={post.imageUrl}
+                            alt="Post image"
+                            fill
+                            sizes="(max-width: 600px) 100vw, 600px"
+                            style={{ objectFit: 'cover' }}
+                            onError={() => { console.error('Image failed to load:', post.imageUrl); }}
+                          />
+                        </div>
                       )}
                     </>
                   )}
 
                   {/* Actions */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
-                    <button onClick={() => toggleComments(post.id)}
+                    <button type="button" aria-label="Toggle comments" onClick={() => toggleComments(post.id)}
                       style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
                       💬 <span>{(comments[post.id] || []).length || ''}</span>
                     </button>
                     {!isOwner && (
-                      <button onClick={() => repost(post)} disabled={repostingId === post.id}
+                      <button type="button" onClick={() => repost(post)} disabled={repostingId === post.id}
                         style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: alreadyReposted ? '#34d399' : '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
                         🔄 <span>{repostCount || ''}</span>
                       </button>
                     )}
-                    <button onClick={() => toggleLike(post)}
+                    <button type="button" aria-label={liked ? 'Unlike post' : 'Like post'} onClick={() => toggleLike(post)}
                       style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: liked ? '#f472b6' : '#6b7280', cursor: 'pointer', fontSize: 13, fontFamily: 'Inter,sans-serif' }}>
                       {liked ? '❤️' : '🤍'} <span>{likeCount || ''}</span>
                     </button>
-                    <button onClick={() => toggleBookmark(post.id)}
+                    <button type="button" aria-label={isBookmarked ? 'Remove bookmark' : 'Bookmark post'} onClick={() => toggleBookmark(post.id)}
                       style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', color: isBookmarked ? '#60a5fa' : '#6b7280', cursor: 'pointer', fontSize: 16, marginLeft: 'auto' }}>
                       {isBookmarked ? '🔖' : '📄'}
                     </button>
@@ -361,7 +369,7 @@ export default function Feed() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 12 }}>
                           {(comments[post.id] || []).map((comment) => (
                             <div key={comment.id} style={{ display: 'flex', gap: 10 }}>
-                              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#a78bfa', flexShrink: 0 }}>
+                              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#a78bfa', flexShrink: 0 }}>
                                 {comment.fullName?.[0]?.toUpperCase() || 'U'}
                               </div>
                               <div style={{ background: 'rgba(255,255,255,0.03)', border: '0.5px solid rgba(255,255,255,0.06)', borderRadius: 12, padding: '8px 12px', flex: 1 }}>
@@ -380,7 +388,7 @@ export default function Feed() {
                           onKeyDown={(e) => { if (e.key === 'Enter') addComment(post); }}
                           style={{ ...inputStyle, flex: 1, padding: '8px 14px', fontSize: 13, borderRadius: 20 }}
                         />
-                        <button onClick={() => addComment(post)} disabled={!commentInputs[post.id]?.trim()}
+                        <button type="button" onClick={() => addComment(post)} disabled={!commentInputs[post.id]?.trim()}
                           style={{ padding: '8px 18px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif', opacity: !commentInputs[post.id]?.trim() ? 0.5 : 1 }}>
                           Reply
                         </button>
@@ -389,7 +397,7 @@ export default function Feed() {
                   )}
                 </div>
               </div>
-            </div>
+            </article>
           );
         })}
       </div>
