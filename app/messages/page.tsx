@@ -357,9 +357,14 @@ function MessagesContent() {
     if (!file) return;
     if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
     if (file.size > 10 * 1024 * 1024) { alert('Image must be under 10 MB.'); return; }
-    const url = URL.createObjectURL(file);
-    setImagePreview({ file, url });
-    // reset so same file can be re-selected
+    // Validate the file is readable before setting preview
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = URL.createObjectURL(file);
+      setImagePreview({ file, url });
+    };
+    reader.onerror = () => alert('Could not read file. Please try another image.');
+    reader.readAsArrayBuffer(file);
     e.target.value = '';
   };
 
@@ -368,10 +373,22 @@ function MessagesContent() {
     setImageUploading(true);
     try {
       const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
-      const path = `chat_images/${selectedChat.id}/${user.uid}_${Date.now()}_${imagePreview.file.name}`;
+
+      // Sanitize filename — remove spaces and special chars that break Storage paths
+      const ext = imagePreview.file.name.split('.').pop()?.toLowerCase() || 'jpg';
+      const safeName = `${user.uid}_${Date.now()}.${ext}`;
+      const path = `chat_images/${selectedChat.id}/${safeName}`;
       const sRef = storageRef(storage, path);
-      await uploadBytes(sRef, imagePreview.file);
+
+      // Convert file to ArrayBuffer first — avoids CORS/blob issues on some browsers
+      const arrayBuffer = await imagePreview.file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+
+      // Upload with metadata so Content-Type is set correctly
+      await uploadBytes(sRef, bytes, { contentType: imagePreview.file.type || 'image/jpeg' });
       const imageUrl = await getDownloadURL(sRef);
+
+      if (!imageUrl) throw new Error('No download URL returned from storage');
 
       await addDoc(collection(db, collectionName, selectedChat.id, 'messages'), {
         senderId: user.uid,
@@ -401,8 +418,12 @@ function MessagesContent() {
       URL.revokeObjectURL(imagePreview.url);
       setImagePreview(null);
       setReplyingTo(null);
-      await loadMessages(collectionName, selectedChat.id);
-    } catch (err: any) { alert('Upload failed: ' + err.message); }
+      const collName = selectedChat.type === 'group' ? 'groups' : 'conversations';
+      await loadMessages(collName, selectedChat.id);
+    } catch (err: any) {
+      console.error('Image upload error:', err);
+      alert('Upload failed: ' + (err.message || 'Unknown error. Check Firebase Storage rules.'));
+    }
     setImageUploading(false);
   };
 
