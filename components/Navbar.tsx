@@ -20,7 +20,6 @@ export default function Navbar() {
         setUid(firebaseUser.uid);
         await loadUnreadCount(firebaseUser.uid);
         await loadProfile(firebaseUser.uid);
-        // Mark user as active when they open the app
         try {
           await updateDoc(doc(db, 'users', firebaseUser.uid), { lastSeen: serverTimestamp() });
         } catch (_) {}
@@ -58,9 +57,9 @@ export default function Navbar() {
   const navItems = [
     { href: '/feed', icon: '🏠', label: 'Home' },
     { href: '/stories', icon: '✨', label: 'Stories' },
-    { href: '/search', icon: '🔍', label: 'Search' },
     { href: '/messages', icon: '💬', label: 'DMs' },
     { href: '/games', icon: '🎮', label: 'Games' },
+    { href: '/music', icon: '🎵', label: 'Music' },
     { href: '/notifications', icon: '🔔', label: 'Alerts', badge: unreadCount },
     { href: '/profile', icon: null, label: 'Profile', isAvatar: true },
   ];
@@ -79,7 +78,6 @@ export default function Navbar() {
             ALTRONICS
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Mini avatar in header */}
             <div style={{ position: 'relative', width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', border: '1.5px solid rgba(139,92,246,0.4)', flexShrink: 0 }}>
               {profile?.photoURL ? (
                 <img src={profile.photoURL} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -88,7 +86,6 @@ export default function Navbar() {
                   {initials}
                 </div>
               )}
-              {/* Active dot — only shown if activeStatus is on */}
               {isActiveVisible && (
                 <span style={{ position: 'absolute', bottom: 0, right: 0, width: 9, height: 9, borderRadius: '50%', background: '#22c55e', border: '1.5px solid #0a0a0f' }} />
               )}
@@ -111,14 +108,13 @@ export default function Navbar() {
         borderTop: '0.5px solid rgba(139,92,246,0.15)',
         padding: '8px 0 16px',
         display: pathname === '/messages' ? 'none' : 'block',
-        // games page manages its own nav when in a room
       }}>
         <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
-          {navItems.map(({ href, icon, label, badge, isAvatar }) => {
+          {navItems.map(({ href, icon, label, badge, isAvatar }: any) => {
             const isActive = pathname === href;
             return (
               <Link key={href} href={href} style={{ textDecoration: 'none' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 12px', borderRadius: 14, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent', transition: 'all 0.2s', position: 'relative', cursor: 'pointer' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 8px', borderRadius: 14, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent', transition: 'all 0.2s', position: 'relative', cursor: 'pointer' }}>
                   {isAvatar ? (
                     <div style={{ position: 'relative', width: 24, height: 24, borderRadius: '50%', overflow: 'hidden', border: isActive ? '1.5px solid #a78bfa' : '1.5px solid rgba(139,92,246,0.3)' }}>
                       {profile?.photoURL ? (
@@ -133,11 +129,11 @@ export default function Navbar() {
                       )}
                     </div>
                   ) : (
-                    <span style={{ fontSize: 20 }}>{icon}</span>
+                    <span style={{ fontSize: 18 }}>{icon}</span>
                   )}
-                  <span style={{ fontSize: 9, fontWeight: 600, color: isActive ? '#a78bfa' : '#6b7280' }}>{label}</span>
+                  <span style={{ fontSize: 8, fontWeight: 600, color: isActive ? '#a78bfa' : '#6b7280' }}>{label}</span>
                   {badge && badge > 0 && (
-                    <span style={{ position: 'absolute', top: 2, right: 8, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', color: 'white', fontSize: 9, fontWeight: 700, width: 15, height: 15, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ position: 'absolute', top: 2, right: 4, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', color: 'white', fontSize: 9, fontWeight: 700, width: 15, height: 15, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {badge > 9 ? '9+' : badge}
                     </span>
                   )}
