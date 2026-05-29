@@ -370,6 +370,7 @@ export default function MusicPage() {
   const [inviteSearch, setInviteSearch] = useState('');
   const [invitedUsers, setInvitedUsers] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (fu) => {
@@ -402,30 +403,41 @@ export default function MusicPage() {
   const createRoom = async () => {
     if (!user || !roomName.trim()) return;
     setCreating(true);
-    const memberIds = [user.uid, ...invitedUsers];
-    const members = [
-      { uid: user.uid, name: userProfile?.fullName || 'Host', photoURL: userProfile?.photoURL },
-      ...invitedUsers.map((uid) => {
-        const u = allUsers.find((x) => x.id === uid);
-        return { uid, name: u?.fullName || 'Member', photoURL: u?.photoURL };
-      }),
-    ];
-    const ref = await addDoc(collection(db, 'musicRooms'), {
-      name: roomName.trim(),
-      hostId: user.uid,
-      hostName: userProfile?.fullName || 'Host',
-      memberIds,
-      members,
-      currentTrack: null,
-      queue: [],
-      createdAt: serverTimestamp(),
-    });
-    const newRoom: MusicRoom = { id: ref.id, name: roomName.trim(), hostId: user.uid, hostName: userProfile?.fullName, memberIds, members, currentTrack: null, queue: [], createdAt: null };
-    setActiveRoom(newRoom);
-    setShowCreate(false);
-    setRoomName('');
-    setInvitedUsers([]);
-    setCreating(false);
+    setCreateError('');
+    try {
+      const memberIds = [user.uid, ...invitedUsers];
+      const members = [
+        { uid: user.uid, name: userProfile?.fullName || 'Host', photoURL: userProfile?.photoURL || '' },
+        ...invitedUsers.map((uid: string) => {
+          const u = allUsers.find((x: any) => x.id === uid);
+          return { uid, name: u?.fullName || 'Member', photoURL: u?.photoURL || '' };
+        }),
+      ];
+      const ref = await addDoc(collection(db, 'musicRooms'), {
+        name: roomName.trim(),
+        hostId: user.uid,
+        hostName: userProfile?.fullName || 'Host',
+        memberIds,
+        members,
+        currentTrack: null,
+        queue: [],
+        createdAt: serverTimestamp(),
+      });
+      const newRoom: MusicRoom = {
+        id: ref.id, name: roomName.trim(), hostId: user.uid,
+        hostName: userProfile?.fullName, memberIds, members,
+        currentTrack: null, queue: [], createdAt: null,
+      };
+      setActiveRoom(newRoom);
+      setShowCreate(false);
+      setRoomName('');
+      setInvitedUsers([]);
+    } catch (err: any) {
+      console.error('createRoom error:', err);
+      setCreateError('Could not create room. Go to Firebase Console → Firestore → Rules and allow musicRooms reads/writes for authenticated users.');
+    } finally {
+      setCreating(false);
+    }
   };
 
   const leaveRoom = () => setActiveRoom(null);
@@ -640,6 +652,11 @@ export default function MusicPage() {
               ))}
             </div>
             <div style={{ padding: '14px 20px 28px', flexShrink: 0 }}>
+              {createError && (
+                <div style={{ background: 'rgba(239,68,68,0.1)', border: '0.5px solid rgba(239,68,68,0.3)', borderRadius: 12, padding: '10px 14px', marginBottom: 12 }}>
+                  <p style={{ color: '#f87171', fontSize: 12, lineHeight: 1.5, margin: 0 }}>⚠️ {createError}</p>
+                </div>
+              )}
               <button onClick={createRoom} disabled={!roomName.trim() || creating} style={{ ...S.btn(true), width: '100%', padding: '14px', fontSize: 15, opacity: roomName.trim() ? 1 : 0.4 }}>
                 {creating ? 'Creating...' : `🎵 Create Room${invitedUsers.length ? ` with ${invitedUsers.length} friend${invitedUsers.length > 1 ? 's' : ''}` : ''}`}
               </button>
