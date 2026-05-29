@@ -15,6 +15,7 @@ import {
   getDoc,
   updateDoc,
 } from 'firebase/firestore';
+import Image from 'next/image';
 import Navbar from '@/components/Navbar';
 
 export default function Profile() {
@@ -43,11 +44,12 @@ export default function Profile() {
   const [modalUsers, setModalUsers] = useState<any[]>([]);
   const [modalLoading, setModalLoading] = useState(false);
 
-  const router = useRouter();
+  const { push } = useRouter();
 
+  // eslint-disable-next-line react-compiler/react-compiler
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) { router.push('/login'); return; }
+      if (!firebaseUser) { push('/login'); return; }
       setUser(firebaseUser);
       await loadProfile(firebaseUser.uid);
       await loadUserPosts(firebaseUser.uid);
@@ -179,7 +181,7 @@ export default function Profile() {
       <Navbar />
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
-        .toggle-track { transition: background 0.25s; }
+        .toggle-track { transition: background 0.25s, border 0.25s; }
         .toggle-thumb { transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1); }
         .avatar-overlay { opacity: 0; transition: opacity 0.2s; }
         .avatar-wrap:hover .avatar-overlay { opacity: 1; }
@@ -203,10 +205,10 @@ export default function Profile() {
                   style={{ display: 'none' }}
                 />
                 {/* Avatar circle */}
-                <div style={{ width: 80, height: 80, borderRadius: '50%', overflow: 'hidden', border: '2.5px solid rgba(139,92,246,0.5)', position: 'relative', cursor: 'pointer', flexShrink: 0 }}
+                <button type="button" aria-label="Change profile picture" style={{ width: 80, height: 80, borderRadius: '50%', overflow: 'hidden', border: '2.5px solid rgba(139,92,246,0.5)', position: 'relative', cursor: 'pointer', flexShrink: 0, padding: 0, background: 'none' }}
                   onClick={() => !avatarUploading && avatarInputRef.current?.click()}>
                   {profile?.photoURL ? (
-                    <img src={profile.photoURL} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    <Image src={profile.photoURL} alt="Profile picture" fill sizes="80px" style={{ objectFit: 'cover' }} />
                   ) : (
                     <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, fontWeight: 700, color: 'white' }}>
                       {initials}
@@ -216,20 +218,20 @@ export default function Profile() {
                   {avatarUploading && (
                     <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                       <div style={{ width: 24, height: 24, borderRadius: '50%', border: '2px solid rgba(167,139,250,0.3)', borderTopColor: '#a78bfa', animation: 'spin 0.8s linear infinite' }} />
-                      {avatarProgress !== null && <span style={{ fontSize: 9, color: '#a78bfa', fontWeight: 700 }}>{avatarProgress}%</span>}
+                      {avatarProgress !== null && <span style={{ fontSize: 12, color: '#a78bfa', fontWeight: 700 }}>{avatarProgress}%</span>}
                     </div>
                   )}
                   {/* Hover overlay */}
                   {!avatarUploading && (
                     <div className="avatar-overlay" style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
                       <span style={{ fontSize: 16 }}>📷</span>
-                      <span style={{ fontSize: 8, color: 'white', fontWeight: 600 }}>Change</span>
+                      <span style={{ fontSize: 12, color: 'white', fontWeight: 600 }}>Change</span>
                     </div>
                   )}
                 </div>
                 {/* Camera badge */}
                 <div onClick={() => !avatarUploading && avatarInputRef.current?.click()}
-                  style={{ position: 'absolute', bottom: 0, right: 0, width: 24, height: 24, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, cursor: 'pointer', border: '2px solid #0a0a0f', zIndex: 2 }}>
+                  style={{ position: 'absolute', bottom: 0, right: 0, width: 24, height: 24, borderRadius: '50%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, cursor: 'pointer', border: '2px solid #0a0a0f', zIndex: 2 }}>
                   📷
                 </div>
               </div>
@@ -239,18 +241,18 @@ export default function Profile() {
                 {/* Posts — not clickable */}
                 <div style={{ textAlign: 'center' }}>
                   <p style={{ fontSize: 20, fontWeight: 700, color: '#f3f4f6', marginBottom: 2 }}>{posts.length}</p>
-                  <p style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>Posts</p>
+                  <p style={{ fontSize: 12, color: '#6b7280', textTransform: 'uppercase', letterSpacing: 0.5 }}>Posts</p>
                 </div>
                 {/* Followers — clickable */}
-                <div style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openModal('followers')}>
+                <button type="button" aria-label="View followers" onClick={() => openModal('followers')} style={{ textAlign: 'center', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
                   <p style={{ fontSize: 20, fontWeight: 700, color: '#f3f4f6', marginBottom: 2 }}>{profile?.followers?.length || 0}</p>
-                  <p style={{ fontSize: 10, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Followers</p>
-                </div>
+                  <p style={{ fontSize: 12, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Followers</p>
+                </button>
                 {/* Following — clickable */}
-                <div style={{ textAlign: 'center', cursor: 'pointer' }} onClick={() => openModal('following')}>
+                <button type="button" aria-label="View following" onClick={() => openModal('following')} style={{ textAlign: 'center', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
                   <p style={{ fontSize: 20, fontWeight: 700, color: '#f3f4f6', marginBottom: 2 }}>{profile?.following?.length || 0}</p>
-                  <p style={{ fontSize: 10, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Following</p>
-                </div>
+                  <p style={{ fontSize: 12, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 600 }}>Following</p>
+                </button>
               </div>
             </div>
 
@@ -260,10 +262,10 @@ export default function Profile() {
                 <input value={newFullName} onChange={(e) => setNewFullName(e.target.value)} placeholder="Full Name" style={inputStyle} />
                 <input value={newBio} onChange={(e) => setNewBio(e.target.value)} placeholder="Write a bio..." style={inputStyle} />
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={saveProfile} disabled={saving} style={{ flex: 1, padding: '9px', borderRadius: 12, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+                  <button type="button" onClick={saveProfile} disabled={saving} style={{ flex: 1, padding: '9px', borderRadius: 12, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
                     {saving ? 'Saving...' : 'Save'}
                   </button>
-                  <button onClick={() => setEditing(false)} style={{ flex: 1, padding: '9px', borderRadius: 12, background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                  <button type="button" onClick={() => setEditing(false)} style={{ flex: 1, padding: '9px', borderRadius: 12, background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                     Cancel
                   </button>
                 </div>
@@ -273,7 +275,7 @@ export default function Profile() {
                 <p style={{ fontSize: 16, fontWeight: 700, color: '#f3f4f6', marginBottom: 2 }}>{profile?.fullName}</p>
                 <p style={{ fontSize: 12, color: '#a78bfa', marginBottom: 6 }}>@{profile?.username}</p>
                 {profile?.bio && <p style={{ fontSize: 13, color: '#9ca3af', lineHeight: 1.5, marginBottom: 12 }}>{profile.bio}</p>}
-                <button onClick={() => setEditing(true)} style={{ width: '100%', padding: '10px', borderRadius: 12, border: '1px solid rgba(139,92,246,0.4)', background: 'rgba(139,92,246,0.08)', color: '#a78bfa', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                <button type="button" onClick={() => setEditing(true)} style={{ width: '100%', padding: '10px', borderRadius: 12, border: '1px solid rgba(139,92,246,0.4)', background: 'rgba(139,92,246,0.08)', color: '#a78bfa', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
                   Edit Profile
                 </button>
               </div>
@@ -281,17 +283,17 @@ export default function Profile() {
 
             {/* ── Privacy Settings ───────────────────────────────────────── */}
             <div style={{ marginBottom: 16, background: 'rgba(255,255,255,0.02)', border: '0.5px solid rgba(139,92,246,0.15)', borderRadius: 16, overflow: 'hidden' }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: '#6b7280', letterSpacing: 1, textTransform: 'uppercase', padding: '12px 16px 8px' }}>Privacy Settings</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', letterSpacing: 1, textTransform: 'uppercase', padding: '12px 16px 8px' }}>Privacy Settings</p>
 
               {/* Message Seen */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: '0.5px solid rgba(255,255,255,0.04)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: messageSeen ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)', border: `0.5px solid ${messageSeen ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.08)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, transition: 'all 0.25s' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: messageSeen ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)', border: `0.5px solid ${messageSeen ? 'rgba(59,130,246,0.3)' : 'rgba(255,255,255,0.08)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, transition: 'background 0.25s, border 0.25s' }}>
                     ✓✓
                   </div>
                   <div>
                     <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 2 }}>Message Seen</p>
-                    <p style={{ fontSize: 11, color: '#6b7280' }}>{messageSeen ? "Others can see when you've read their messages" : 'Read receipts are hidden'}</p>
+                    <p style={{ fontSize: 12, color: '#6b7280' }}>{messageSeen ? "Others can see when you've read their messages" : 'Read receipts are hidden'}</p>
                   </div>
                 </div>
                 <Toggle
@@ -299,18 +301,19 @@ export default function Profile() {
                   disabled={togglingPrivacy}
                   onChange={(v) => togglePrivacy('messageSeen', v)}
                   color="#3b82f6"
+                  label="Toggle message seen receipts"
                 />
               </div>
 
               {/* Active Status */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderTop: '0.5px solid rgba(255,255,255,0.04)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div style={{ width: 36, height: 36, borderRadius: 10, background: activeStatus ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.04)', border: `0.5px solid ${activeStatus ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, transition: 'all 0.25s' }}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: activeStatus ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.04)', border: `0.5px solid ${activeStatus ? 'rgba(34,197,94,0.3)' : 'rgba(255,255,255,0.08)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, transition: 'background 0.25s, border 0.25s' }}>
                     🟢
                   </div>
                   <div>
                     <p style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 2 }}>Active Status</p>
-                    <p style={{ fontSize: 11, color: '#6b7280' }}>{activeStatus ? "Others can see when you're online" : 'You appear offline to everyone'}</p>
+                    <p style={{ fontSize: 12, color: '#6b7280' }}>{activeStatus ? "Others can see when you're online" : 'You appear offline to everyone'}</p>
                   </div>
                 </div>
                 <Toggle
@@ -318,6 +321,7 @@ export default function Profile() {
                   disabled={togglingPrivacy}
                   onChange={(v) => togglePrivacy('activeStatus', v)}
                   color="#22c55e"
+                  label="Toggle active status visibility"
                 />
               </div>
             </div>
@@ -325,7 +329,7 @@ export default function Profile() {
             {/* Tabs */}
             <div style={{ display: 'flex', borderBottom: '0.5px solid rgba(255,255,255,0.06)', marginTop: 4 }}>
               {(['posts', 'liked'] as const).map((tab) => (
-                <button key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '12px 0', background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid #a78bfa' : '2px solid transparent', color: activeTab === tab ? '#a78bfa' : '#6b7280', fontSize: 13, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize', transition: 'all 0.2s' }}>
+                <button type="button" key={tab} onClick={() => setActiveTab(tab)} style={{ flex: 1, padding: '12px 0', background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid #a78bfa' : '2px solid transparent', color: activeTab === tab ? '#a78bfa' : '#6b7280', fontSize: 13, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize', transition: 'background 0.2s, border 0.2s' }}>
                   {tab === 'posts' ? '⚡ Posts' : '❤️ Liked'}
                 </button>
               ))}
@@ -347,7 +351,7 @@ export default function Profile() {
                   {/* Mini avatar */}
                   <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', border: '1px solid rgba(139,92,246,0.3)', flexShrink: 0 }}>
                     {profile?.photoURL ? (
-                      <img src={profile.photoURL} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      <Image src={profile.photoURL} alt="Profile picture" fill sizes="80px" style={{ objectFit: 'cover' }} />
                     ) : (
                       <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#a78bfa' }}>
                         {initials}
@@ -357,8 +361,8 @@ export default function Profile() {
                   <div style={{ flex: 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                       <span style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6' }}>{profile?.fullName}</span>
-                      <span style={{ fontSize: 11, color: '#6b7280' }}>@{profile?.username}</span>
-                      <span style={{ fontSize: 11, color: '#4b5563', marginLeft: 'auto' }}>
+                      <span style={{ fontSize: 12, color: '#6b7280' }}>@{profile?.username}</span>
+                      <span style={{ fontSize: 12, color: '#4b5563', marginLeft: 'auto' }}>
                         {post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : 'Just now'}
                       </span>
                     </div>
@@ -378,7 +382,11 @@ export default function Profile() {
       {/* ── Followers / Following Modal ─────────────────────────────────── */}
       {showModal && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={showModal === 'followers' ? 'Followers list' : 'Following list'}
           onClick={() => setShowModal(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowModal(null); }}
           style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
           <div
             onClick={(e) => e.stopPropagation()}
@@ -388,7 +396,7 @@ export default function Profile() {
               <h2 style={{ fontSize: 15, fontWeight: 800, color: '#f3f4f6', margin: 0, textTransform: 'capitalize' }}>
                 {showModal === 'followers' ? '👥 Followers' : '➡️ Following'}
               </h2>
-              <button onClick={() => setShowModal(null)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
+              <button type="button" onClick={() => setShowModal(null)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 20, cursor: 'pointer', lineHeight: 1 }}>✕</button>
             </div>
             {/* Modal body */}
             <div style={{ overflowY: 'auto', flex: 1 }}>
@@ -403,16 +411,18 @@ export default function Profile() {
                 </div>
               ) : (
                 modalUsers.map((u: any) => (
-                  <div
+                  <button
+                    type="button"
                     key={u.id}
-                    onClick={() => { setShowModal(null); router.push(`/profile/${u.id}`); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', cursor: 'pointer', borderBottom: '0.5px solid rgba(255,255,255,0.04)', transition: 'background 0.15s' }}
+                    onClick={() => { setShowModal(null); push(`/profile/${u.id}`); }}
+                    aria-label={`View ${u.fullName}'s profile`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', cursor: 'pointer', borderBottom: '0.5px solid rgba(255,255,255,0.04)', transition: 'background 0.15s', background: 'transparent', border: 'none', width: '100%', textAlign: 'left' }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(139,92,246,0.07)')}
                     onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
                     {/* Avatar */}
                     <div style={{ width: 46, height: 46, borderRadius: '50%', overflow: 'hidden', border: '1.5px solid rgba(139,92,246,0.35)', flexShrink: 0 }}>
                       {u.photoURL ? (
-                        <img src={u.photoURL} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        <Image src={u.photoURL} alt={`${u.fullName} profile picture`} fill sizes="46px" style={{ objectFit: 'cover' }} />
                       ) : (
                         <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, fontWeight: 700, color: 'white' }}>
                           {u.fullName?.[0]?.toUpperCase() || 'U'}
@@ -425,7 +435,7 @@ export default function Profile() {
                       <p style={{ fontSize: 12, color: '#a78bfa', margin: 0 }}>@{u.username}</p>
                     </div>
                     <span style={{ color: '#4b5563', fontSize: 18 }}>›</span>
-                  </div>
+                  </button>
                 ))
               )}
             </div>
@@ -437,16 +447,20 @@ export default function Profile() {
 }
 
 // ── Reusable Toggle component ────────────────────────────────────────────────
-function Toggle({ value, onChange, disabled, color = '#8b5cf6' }: {
+function Toggle({ value, onChange, disabled, color = '#8b5cf6', label = 'Toggle' }: {
   value: boolean;
   onChange: (v: boolean) => void;
   disabled?: boolean;
   color?: string;
+  label?: string;
 }) {
   return (
-    <button
+    <button type="button"
       onClick={() => !disabled && onChange(!value)}
       disabled={disabled}
+      role="switch"
+      aria-checked={value}
+      aria-label={label}
       style={{ position: 'relative', width: 46, height: 26, borderRadius: 13, border: 'none', cursor: disabled ? 'not-allowed' : 'pointer', padding: 0, flexShrink: 0, background: value ? color : 'rgba(255,255,255,0.1)', transition: 'background 0.25s', opacity: disabled ? 0.6 : 1 }}
       className="toggle-track"
     >
