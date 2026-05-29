@@ -3,14 +3,16 @@
 import { useEffect, useState, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { auth, db, storage } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, addDoc, getDocs, orderBy,
   query, serverTimestamp, doc, getDoc, where,
   updateDoc, onSnapshot, setDoc, deleteDoc,
 } from 'firebase/firestore';
-import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+// Cloudinary used for image uploads — no Firebase Storage needed
+const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 import Navbar from '@/components/Navbar';
 
 function MessagesContent() {
@@ -370,26 +372,30 @@ function MessagesContent() {
 
   const sendImage = async () => {
     if (!imagePreview || !user || !selectedChat) return;
+    if (!CLOUD_NAME || !UPLOAD_PRESET) {
+      alert('Cloudinary is not configured. Check NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME and NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET in your .env');
+      return;
+    }
     setImageUploading(true);
     try {
+      // ── Upload to Cloudinary ───────────────────────────────────────────────
+      const formData = new FormData();
+      formData.append('file', imagePreview.file);
+      formData.append('upload_preset', UPLOAD_PRESET!);
+      formData.append('folder', 'chat_images');
+
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+        { method: 'POST', body: formData }
+      );
+      const data = await res.json();
+      if (!data.secure_url) {
+        throw new Error(data.error?.message || 'Cloudinary upload failed — no URL returned');
+      }
+      const imageUrl: string = data.secure_url;
+
+      // ── Save message to Firestore ─────────────────────────────────────────
       const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
-
-      // Sanitize filename — remove spaces and special chars that break Storage paths
-      const ext = imagePreview.file.name.split('.').pop()?.toLowerCase() || 'jpg';
-      const safeName = `${user.uid}_${Date.now()}.${ext}`;
-      const path = `chat_images/${selectedChat.id}/${safeName}`;
-      const sRef = storageRef(storage, path);
-
-      // Convert file to ArrayBuffer first — avoids CORS/blob issues on some browsers
-      const arrayBuffer = await imagePreview.file.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-
-      // Upload with metadata so Content-Type is set correctly
-      await uploadBytes(sRef, bytes, { contentType: imagePreview.file.type || 'image/jpeg' });
-      const imageUrl = await getDownloadURL(sRef);
-
-      if (!imageUrl) throw new Error('No download URL returned from storage');
-
       await addDoc(collection(db, collectionName, selectedChat.id, 'messages'), {
         senderId: user.uid,
         senderUsername: userProfile?.username || 'me',
@@ -407,6 +413,7 @@ function MessagesContent() {
         } : {}),
       });
 
+      // ── Send notification for DMs ─────────────────────────────────────────
       if (selectedChat.type === 'dm') {
         await addDoc(collection(db, 'notifications'), {
           toUserId: selectedChat.otherUser.id, fromUserId: user.uid,
@@ -418,11 +425,10 @@ function MessagesContent() {
       URL.revokeObjectURL(imagePreview.url);
       setImagePreview(null);
       setReplyingTo(null);
-      const collName = selectedChat.type === 'group' ? 'groups' : 'conversations';
-      await loadMessages(collName, selectedChat.id);
+      await loadMessages(collectionName, selectedChat.id);
     } catch (err: any) {
       console.error('Image upload error:', err);
-      alert('Upload failed: ' + (err.message || 'Unknown error. Check Firebase Storage rules.'));
+      alert('Upload failed: ' + (err.message || 'Unknown error'));
     }
     setImageUploading(false);
   };
