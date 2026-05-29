@@ -3,13 +3,14 @@
 import { useEffect, useState, useRef, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, storage } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, addDoc, getDocs, orderBy,
   query, serverTimestamp, doc, getDoc, where,
   updateDoc, onSnapshot, setDoc, deleteDoc,
 } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Navbar from '@/components/Navbar';
 
 function MessagesContent() {
@@ -47,6 +48,11 @@ function MessagesContent() {
   const [reactingToMsgId, setReactingToMsgId] = useState<string | null>(null); // msg getting reacted to
   const router = useRouter();
   const searchParams = useSearchParams();
+
+  // ── Image upload state ────────────────────────────────────────────────────
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imagePreview, setImagePreview] = useState<{ file: File; url: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -326,6 +332,66 @@ function MessagesContent() {
     } catch (err) { console.error(err); }
   };
 
+  // ── Upload & send an image message ───────────────────────────────────────
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
+    if (file.size > 10 * 1024 * 1024) { alert('Image must be under 10 MB.'); return; }
+    const url = URL.createObjectURL(file);
+    setImagePreview({ file, url });
+    // reset so same file can be re-selected
+    e.target.value = '';
+  };
+
+  const sendImage = async () => {
+    if (!imagePreview || !user || !selectedChat) return;
+    setImageUploading(true);
+    try {
+      const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
+      const path = `chat_images/${selectedChat.id}/${user.uid}_${Date.now()}_${imagePreview.file.name}`;
+      const sRef = storageRef(storage, path);
+      await uploadBytes(sRef, imagePreview.file);
+      const imageUrl = await getDownloadURL(sRef);
+
+      await addDoc(collection(db, collectionName, selectedChat.id, 'messages'), {
+        senderId: user.uid,
+        senderUsername: userProfile?.username || 'me',
+        senderFullName: userProfile?.fullName || 'User',
+        content: '',
+        imageUrl,
+        type: 'image',
+        createdAt: serverTimestamp(),
+        ...(replyingTo ? {
+          replyTo: {
+            id: replyingTo.id,
+            content: replyingTo.content || '📷 Photo',
+            senderUsername: replyingTo.senderUsername,
+          }
+        } : {}),
+      });
+
+      if (selectedChat.type === 'dm') {
+        await addDoc(collection(db, 'notifications'), {
+          toUserId: selectedChat.otherUser.id, fromUserId: user.uid,
+          fromUsername: userProfile?.username || 'someone',
+          type: 'message', read: false, createdAt: serverTimestamp(),
+        });
+      }
+
+      URL.revokeObjectURL(imagePreview.url);
+      setImagePreview(null);
+      setReplyingTo(null);
+      await loadMessages(collectionName, selectedChat.id);
+    } catch (err: any) { alert('Upload failed: ' + err.message); }
+    setImageUploading(false);
+  };
+
+  const cancelImagePreview = () => {
+    if (imagePreview) URL.revokeObjectURL(imagePreview.url);
+    setImagePreview(null);
+  };
+
   const startCall = (type: 'video' | 'voice') => {
     if (!selectedChat) return;
     setCallType(type);
@@ -540,6 +606,7 @@ function MessagesContent() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       <Navbar />
 
       {/* Create Group Modal */}
@@ -988,19 +1055,42 @@ function MessagesContent() {
                             )}
 
                             {/* Main bubble */}
-                            <div style={{ padding: '10px 14px', borderRadius: msg.replyTo ? (isMe ? '0 18px 4px 18px' : '18px 0 18px 4px') : (isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px'), background: isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)', border: isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)' }}>
-                              <p style={{ fontSize: 13, color: 'white', margin: 0, lineHeight: 1.6 }}>{renderContent(msg.content)}</p>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
-                                <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
-                                  {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                                </span>
-                                {isMe && selectedChat.type === 'dm' && (
-                                  <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
-                                    title={(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? 'Seen' : 'Sent'}>
-                                    {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
-                                  </span>
-                                )}
-                              </div>
+                            <div style={{ padding: msg.type === 'image' ? '4px' : '10px 14px', borderRadius: msg.replyTo ? (isMe ? '0 18px 4px 18px' : '18px 0 18px 4px') : (isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px'), background: isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)', border: isMe ? 'none' : '0.5px solid rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                              {msg.type === 'image' && msg.imageUrl ? (
+                                <div>
+                                  <img
+                                    src={msg.imageUrl}
+                                    alt="Image"
+                                    onClick={() => window.open(msg.imageUrl, '_blank')}
+                                    style={{ display: 'block', maxWidth: 260, maxHeight: 320, width: '100%', borderRadius: 14, cursor: 'zoom-in', objectFit: 'cover' }}
+                                  />
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, padding: '4px 8px 2px' }}>
+                                    <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
+                                      {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                    </span>
+                                    {isMe && selectedChat.type === 'dm' && (
+                                      <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}>
+                                        {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ) : (
+                                <>
+                                  <p style={{ fontSize: 13, color: 'white', margin: 0, lineHeight: 1.6 }}>{renderContent(msg.content)}</p>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 }}>
+                                    <span style={{ fontSize: 10, color: isMe ? 'rgba(255,255,255,0.6)' : '#4b5563' }}>
+                                      {msg.createdAt?.toDate ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                                    </span>
+                                    {isMe && selectedChat.type === 'dm' && (
+                                      <span style={{ fontSize: 10, fontWeight: 700, color: (msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '#60a5fa' : 'rgba(255,255,255,0.35)' }}
+                                        title={(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? 'Seen' : 'Sent'}>
+                                        {(msg.seenBy || []).includes(selectedChat.otherUser?.id) ? '✓✓' : '✓'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1090,8 +1180,52 @@ function MessagesContent() {
                     </div>
                   )}
 
+                  {/* Image preview bar — shown when user picks a photo */}
+                  {imagePreview && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: 'rgba(139,92,246,0.08)', borderBottom: '0.5px solid rgba(139,92,246,0.15)' }}>
+                      <div style={{ position: 'relative', flexShrink: 0 }}>
+                        <img src={imagePreview.url} alt="preview" style={{ width: 56, height: 56, borderRadius: 10, objectFit: 'cover', border: '0.5px solid rgba(139,92,246,0.3)' }} />
+                        {imageUploading && (
+                          <div style={{ position: 'absolute', inset: 0, borderRadius: 10, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <div style={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid rgba(167,139,250,0.3)', borderTopColor: '#a78bfa', animation: 'spin 0.7s linear infinite' }} />
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <p style={{ fontSize: 12, fontWeight: 600, color: '#f3f4f6', margin: '0 0 2px' }}>📷 Photo ready to send</p>
+                        <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>
+                          {(imagePreview.file.size / 1024).toFixed(0)} KB · {imagePreview.file.name.slice(0, 28)}
+                        </p>
+                      </div>
+                      <button onClick={sendImage} disabled={imageUploading}
+                        style={{ padding: '8px 16px', borderRadius: 12, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: imageUploading ? 'not-allowed' : 'pointer', opacity: imageUploading ? 0.6 : 1, fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
+                        {imageUploading ? 'Sending...' : 'Send'}
+                      </button>
+                      <button onClick={cancelImagePreview} disabled={imageUploading}
+                        style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
                   {/* Input row */}
                   <div style={{ padding: '10px 12px 20px', display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {/* Hidden file input */}
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleFileSelect}
+                      style={{ display: 'none' }}
+                    />
+                    {/* 📷 Image button */}
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={imageUploading}
+                      style={{ width: 36, height: 36, borderRadius: '50%', background: imagePreview ? 'rgba(139,92,246,0.25)' : 'rgba(139,92,246,0.1)', border: imagePreview ? '0.5px solid rgba(139,92,246,0.5)' : '0.5px solid rgba(139,92,246,0.25)', fontSize: 17, cursor: imageUploading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.15s' }}
+                      title="Send image">
+                      📷
+                    </button>
                     {/* # mention trigger button */}
                     <button
                       onClick={() => {
