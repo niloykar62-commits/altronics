@@ -60,6 +60,7 @@ export default function Navbar() {
     { href: '/stories', icon: '✨', label: 'Stories' },
     { href: '/search', icon: '🔍', label: 'Search' },
     { href: '/messages', icon: '💬', label: 'DMs' },
+    { href: '/games', icon: '🎮', label: 'Games' },
     { href: '/notifications', icon: '🔔', label: 'Alerts', badge: unreadCount },
     { href: '/profile', icon: null, label: 'Profile', isAvatar: true },
   ];
@@ -110,6 +111,7 @@ export default function Navbar() {
         borderTop: '0.5px solid rgba(139,92,246,0.15)',
         padding: '8px 0 16px',
         display: pathname === '/messages' ? 'none' : 'block',
+        // games page manages its own nav when in a room
       }}>
         <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
           {navItems.map(({ href, icon, label, badge, isAvatar }) => {
