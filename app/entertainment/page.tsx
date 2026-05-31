@@ -512,6 +512,345 @@ function HotTakeGame({ room, user }: { room: GameRoom; user: any }) {
   );
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION 3 — WATCH TOGETHER
+// ══════════════════════════════════════════════════════════════════════════════
+
+interface WatchRoom {
+  id: string;
+  name: string;
+  hostId: string;
+  hostName: string;
+  memberIds: string[];
+  members: { uid: string; name: string; photoURL?: string }[];
+  videoId: string | null;
+  videoTitle: string | null;
+  videoThumb: string | null;
+  isPlaying: boolean;
+  seekTo: number;
+  startedAt: number;
+  updatedAt: any;
+  createdAt: any;
+}
+
+interface WatchChatMsg {
+  id: string;
+  uid: string;
+  username: string;
+  photoURL?: string;
+  text: string;
+  createdAt: any;
+}
+
+function WatchPlayer({ room, user, isHost }: { room: WatchRoom; user: any; isHost: boolean }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const playerRef = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+  const [paused, setPaused] = useState(!room.isPlaying);
+  const syncRef = useRef<any>(null);
+
+  useEffect(() => {
+    if ((window as any).YT?.Player) { initPlayer(); return; }
+    if (!document.getElementById('yt-api-watch')) {
+      const tag = document.createElement('script');
+      tag.id = 'yt-api-watch';
+      tag.src = 'https://www.youtube.com/iframe_api';
+      document.head.appendChild(tag);
+    }
+    const prev = (window as any).onYouTubeIframeAPIReady;
+    (window as any).onYouTubeIframeAPIReady = () => { prev?.(); initPlayer(); };
+    return () => { playerRef.current?.destroy?.(); clearInterval(syncRef.current); };
+  }, []);
+
+  const initPlayer = () => {
+    if (!containerRef.current || !room.videoId) return;
+    playerRef.current?.destroy?.();
+    playerRef.current = new (window as any).YT.Player(containerRef.current, {
+      height: '100%', width: '100%',
+      videoId: room.videoId,
+      playerVars: { autoplay: room.isPlaying ? 1 : 0, controls: isHost ? 1 : 0, rel: 0, modestbranding: 1, iv_load_policy: 3 },
+      events: {
+        onReady: (e: any) => {
+          setReady(true);
+          // Seek to current position
+          if (room.isPlaying) {
+            const elapsed = (Date.now() - room.startedAt) / 1000;
+            e.target.seekTo(elapsed, true);
+            e.target.playVideo();
+          } else {
+            e.target.seekTo(room.seekTo, true);
+            e.target.pauseVideo();
+          }
+        },
+        onStateChange: (e: any) => {
+          if (!isHost) return;
+          if (e.data === 1) hostSyncPlay();   // playing
+          if (e.data === 2) hostSyncPause();  // paused
+        },
+      },
+    });
+  };
+
+  // When room state changes, sync non-host viewers
+  useEffect(() => {
+    if (!ready || !playerRef.current || isHost) return;
+    if (room.isPlaying) {
+      const elapsed = (Date.now() - room.startedAt) / 1000;
+      playerRef.current.seekTo(elapsed, true);
+      playerRef.current.playVideo();
+      setPaused(false);
+    } else {
+      playerRef.current.seekTo(room.seekTo, true);
+      playerRef.current.pauseVideo();
+      setPaused(true);
+    }
+  }, [room.isPlaying, room.startedAt, ready]);
+
+  // Periodic drift correction for guests
+  useEffect(() => {
+    if (!ready || isHost) return;
+    syncRef.current = setInterval(() => {
+      if (!room.isPlaying || !playerRef.current) return;
+      const elapsed = (Date.now() - room.startedAt) / 1000;
+      const cur = playerRef.current.getCurrentTime?.() || 0;
+      if (Math.abs(cur - elapsed) > 4) playerRef.current.seekTo(elapsed, true);
+    }, 5000);
+    return () => clearInterval(syncRef.current);
+  }, [ready, isHost, room.isPlaying, room.startedAt]);
+
+  // When videoId changes (host picks new video)
+  useEffect(() => {
+    if (!ready || !room.videoId) return;
+    playerRef.current?.loadVideoById(room.videoId);
+    setTimeout(() => {
+      if (room.isPlaying) {
+        const elapsed = (Date.now() - room.startedAt) / 1000;
+        playerRef.current?.seekTo(elapsed, true);
+        playerRef.current?.playVideo();
+      }
+    }, 800);
+  }, [room.videoId, ready]);
+
+  const hostSyncPlay = async () => {
+    const cur = playerRef.current?.getCurrentTime?.() || 0;
+    await updateDoc(doc(db, 'watchRooms', room.id), {
+      isPlaying: true,
+      startedAt: Date.now() - cur * 1000,
+      seekTo: cur,
+      updatedAt: serverTimestamp(),
+    });
+    setPaused(false);
+  };
+
+  const hostSyncPause = async () => {
+    const cur = playerRef.current?.getCurrentTime?.() || 0;
+    await updateDoc(doc(db, 'watchRooms', room.id), {
+      isPlaying: false,
+      seekTo: cur,
+      updatedAt: serverTimestamp(),
+    });
+    setPaused(true);
+  };
+
+  if (!room.videoId) return null;
+
+  return (
+    <div style={{ ...S.card, overflow: 'hidden', marginBottom: 16 }}>
+      <div style={{ position: 'relative', width: '100%', paddingTop: '56.25%', background: '#000' }}>
+        <div ref={containerRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+      </div>
+      <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ color: '#f3f4f6', fontWeight: 700, fontSize: 13, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{room.videoTitle}</p>
+          <p style={{ color: isHost ? '#a78bfa' : '#6b7280', fontSize: 12, margin: 0 }}>{isHost ? '🎬 You control playback' : `🔗 Synced with ${room.hostName}`}</p>
+        </div>
+        {!isHost && (
+          <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 20, background: room.isPlaying ? 'rgba(34,197,94,0.1)' : 'rgba(255,255,255,0.05)', color: room.isPlaying ? '#34d399' : '#6b7280', fontWeight: 600 }}>
+            {room.isPlaying ? '▶ Live' : '⏸ Paused'}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; user: any; userProfile: any; onLeave: () => void }) {
+  const isHost = room.hostId === user.uid;
+  const [urlInput, setUrlInput] = useState('');
+  const [loadingUrl, setLoadingUrl] = useState(false);
+  const [urlError, setUrlError] = useState('');
+  const [chatInput, setChatInput] = useState('');
+  const [chatMsgs, setChatMsgs] = useState<WatchChatMsg[]>([]);
+  const [showChat, setShowChat] = useState(true);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'watchRooms', room.id, 'chat'), orderBy('createdAt', 'asc')),
+      (snap) => {
+        setChatMsgs(snap.docs.map(d => ({ id: d.id, ...d.data() } as WatchChatMsg)));
+        setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 60);
+      }
+    );
+    return () => unsub();
+  }, [room.id]);
+
+  const loadVideo = async () => {
+    const vid = extractVideoId(urlInput.trim());
+    if (!vid) { setUrlError('Invalid YouTube URL. Try: https://youtube.com/watch?v=...'); return; }
+    setLoadingUrl(true); setUrlError('');
+    try {
+      const info = await getVideoInfo(vid);
+      await updateDoc(doc(db, 'watchRooms', room.id), {
+        videoId: vid,
+        videoTitle: info.title,
+        videoThumb: info.thumbnail,
+        isPlaying: true,
+        startedAt: Date.now(),
+        seekTo: 0,
+        updatedAt: serverTimestamp(),
+      });
+      setUrlInput('');
+    } catch (err: any) { setUrlError('Failed to load video: ' + err.message); }
+    setLoadingUrl(false);
+  };
+
+  const sendChat = async () => {
+    if (!chatInput.trim() || !user || !userProfile) return;
+    const text = chatInput.trim();
+    setChatInput('');
+    await addDoc(collection(db, 'watchRooms', room.id, 'chat'), {
+      uid: user.uid,
+      username: userProfile?.username || 'user',
+      photoURL: userProfile?.photoURL || null,
+      text,
+      createdAt: serverTimestamp(),
+    });
+  };
+
+  return (
+    <>
+      <Navbar />
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box}`}</style>
+      <div style={S.page}>
+        {/* Header */}
+        <div style={{ background: 'rgba(10,10,15,0.95)', backdropFilter: 'blur(20px)', borderBottom: '0.5px solid rgba(139,92,246,0.15)', padding: '14px 20px', position: 'sticky', top: 56, zIndex: 10 }}>
+          <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button type="button" aria-label="Back" onClick={onLeave} style={{ background: 'none', border: 'none', color: '#a78bfa', fontSize: 24, cursor: 'pointer', padding: 0, lineHeight: 1 }}>‹</button>
+              <div>
+                <p style={{ color: '#f3f4f6', fontWeight: 800, fontSize: 15, margin: 0 }}>🎬 {room.name}</p>
+                <p style={{ color: '#6b7280', fontSize: 12, margin: 0 }}>{room.members.length} watching · hosted by {room.hostName}</p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" onClick={() => setShowChat(v => !v)} style={{ ...S.btn(showChat), padding: '6px 12px', fontSize: 12 }}>💬</button>
+              {isHost && (
+                <button type="button" onClick={async () => { await deleteDoc(doc(db, 'watchRooms', room.id)); onLeave(); }} style={{ ...S.btn(false, true), padding: '5px 12px', fontSize: 12 }}>End</button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ maxWidth: 600, margin: '0 auto', padding: '16px 20px' }}>
+          {/* Video player */}
+          {room.videoId
+            ? <WatchPlayer room={room} user={user} isHost={isHost} />
+            : (
+              <div style={{ ...S.card, padding: '40px 20px', textAlign: 'center', marginBottom: 16 }}>
+                <p style={{ fontSize: 48, marginBottom: 12 }}>🎬</p>
+                <p style={{ color: '#9ca3af', fontSize: 15, fontWeight: 600, marginBottom: 4 }}>No video loaded yet</p>
+                <p style={{ color: '#4b5563', fontSize: 13 }}>{isHost ? 'Paste a YouTube URL below to start watching!' : 'Waiting for the host to pick a video…'}</p>
+              </div>
+            )
+          }
+
+          {/* URL input — host only */}
+          {isHost && (
+            <div style={{ ...S.card, padding: '16px', marginBottom: 16 }}>
+              <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>🔗 {room.videoId ? 'Change Video' : 'Load a Video'}</p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  value={urlInput}
+                  onChange={(e) => { setUrlInput(e.target.value); setUrlError(''); }}
+                  onKeyDown={(e) => e.key === 'Enter' && loadVideo()}
+                  placeholder="Paste any YouTube URL…"
+                  style={{ ...S.input, flex: 1, fontSize: 13 }}
+                />
+                <button type="button" onClick={loadVideo} disabled={!urlInput.trim() || loadingUrl}
+                  style={{ ...S.btn(true), padding: '10px 16px', flexShrink: 0, opacity: !urlInput.trim() || loadingUrl ? 0.5 : 1 }}>
+                  {loadingUrl ? '…' : 'Load'}
+                </button>
+              </div>
+              {urlError && <p style={{ color: '#f87171', fontSize: 12, marginTop: 8 }}>⚠️ {urlError}</p>}
+              <p style={{ color: '#4b5563', fontSize: 11, marginTop: 8 }}>Works with any YouTube link — movies, shorts, clips, music videos</p>
+            </div>
+          )}
+
+          {/* Live chat */}
+          {showChat && (
+            <div style={{ ...S.card, overflow: 'hidden' }}>
+              <div style={{ padding: '12px 14px', borderBottom: '0.5px solid rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14 }}>💬</span>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#f3f4f6' }}>Watch Chat</p>
+                <span style={{ marginLeft: 'auto', width: 7, height: 7, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e', display: 'inline-block' }} />
+              </div>
+              <div style={{ height: 260, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {chatMsgs.length === 0 && (
+                  <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <p style={{ color: '#374151', fontSize: 13 }}>Chat while you watch 🎬</p>
+                  </div>
+                )}
+                {chatMsgs.map((msg) => {
+                  const isMe = msg.uid === user?.uid;
+                  return (
+                    <div key={msg.id} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexDirection: isMe ? 'row-reverse' : 'row' }}>
+                      <div style={{ width: 26, height: 26, borderRadius: '50%', overflow: 'hidden', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'white' }}>
+                        {msg.photoURL ? <img src={msg.photoURL} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="" /> : msg.username?.[0]?.toUpperCase()}
+                      </div>
+                      <div style={{ maxWidth: '72%' }}>
+                        {!isMe && <p style={{ margin: '0 0 2px', fontSize: 9, color: '#a78bfa', fontWeight: 700 }}>@{msg.username}</p>}
+                        <div style={{ padding: '7px 12px', borderRadius: isMe ? '14px 14px 4px 14px' : '14px 14px 14px 4px', background: isMe ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)', fontSize: 13, color: '#f3f4f6', lineHeight: 1.5 }}>
+                          {msg.text}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={chatEndRef} />
+              </div>
+              <div style={{ padding: '10px 12px', borderTop: '0.5px solid rgba(255,255,255,0.05)', display: 'flex', gap: 8 }}>
+                <input value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); sendChat(); } }}
+                  placeholder="React to the video…" style={{ ...S.input, flex: 1, padding: '9px 14px' }} />
+                <button type="button" onClick={sendChat} disabled={!chatInput.trim()}
+                  style={{ width: 36, height: 36, borderRadius: '50%', background: chatInput.trim() ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'rgba(255,255,255,0.06)', border: 'none', color: 'white', fontSize: 14, cursor: chatInput.trim() ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>↑</button>
+              </div>
+            </div>
+          )}
+
+          {/* Members list */}
+          <div style={{ ...S.card, padding: '16px', marginTop: 16 }}>
+            <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 12 }}>👥 Watching ({room.members.length})</p>
+            {room.members.map((m) => (
+              <div key={m.uid} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderTop: '0.5px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ width: 34, height: 34, borderRadius: '50%', overflow: 'hidden', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white', flexShrink: 0 }}>
+                  {m.photoURL ? <img src={m.photoURL} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={m.name} /> : m.name[0]?.toUpperCase()}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <p style={{ color: '#f3f4f6', fontSize: 13, fontWeight: 600, margin: 0 }}>{m.name}{m.uid === user.uid ? ' (You)' : ''}</p>
+                  {m.uid === room.hostId && <p style={{ color: '#a78bfa', fontSize: 11, margin: 0 }}>🎬 Host</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN ENTERTAINMENT PAGE
 // ══════════════════════════════════════════════════════════════════════════════
@@ -523,7 +862,7 @@ export default function EntertainmentPage() {
   const [pageLoading, setPageLoading] = useState(true);
 
   // ── Tab ───────────────────────────────────────────────────────────────────
-  const [tab, setTab] = useState<'music' | 'games'>('music');
+  const [tab, setTab] = useState<'music' | 'games' | 'watch'>('music');
 
   // ── Music state ───────────────────────────────────────────────────────────
   const [musicRooms, setMusicRooms] = useState<MusicRoom[]>([]);
@@ -539,6 +878,14 @@ export default function EntertainmentPage() {
   const [showCreateGame, setShowCreateGame] = useState(false);
   const [selectedGame, setSelectedGame] = useState<GameType>('word_duel');
   const [creatingGame, setCreatingGame] = useState(false);
+
+  // ── Watch Together state ──────────────────────────────────────────────────
+  const [watchRooms, setWatchRooms] = useState<WatchRoom[]>([]);
+  const [activeWatchRoom, setActiveWatchRoom] = useState<WatchRoom | null>(null);
+  const [showCreateWatch, setShowCreateWatch] = useState(false);
+  const [watchRoomName, setWatchRoomName] = useState('');
+  const [creatingWatch, setCreatingWatch] = useState(false);
+  const [watchCreateError, setWatchCreateError] = useState('');
 
   // ── Shared invite state ───────────────────────────────────────────────────
   const [inviteSearch, setInviteSearch] = useState('');
@@ -587,6 +934,56 @@ export default function EntertainmentPage() {
     });
     return () => unsub();
   }, [user, activeGameRoom?.id]);
+
+  // ── Live watch rooms ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'watchRooms'), where('memberIds', 'array-contains', user.uid));
+    const unsub = onSnapshot(q, (snap) => {
+      const rooms = snap.docs.map((d) => ({ id: d.id, ...d.data() } as WatchRoom));
+      setWatchRooms(rooms);
+      if (activeWatchRoom) {
+        const updated = rooms.find((r) => r.id === activeWatchRoom.id);
+        if (updated) setActiveWatchRoom(updated);
+      }
+    });
+    return () => unsub();
+  }, [user, activeWatchRoom?.id]);
+
+  // ── Create watch room ─────────────────────────────────────────────────────
+  const createWatchRoom = async () => {
+    if (!watchRoomName.trim() || !user) return;
+    setCreatingWatch(true); setWatchCreateError('');
+    try {
+      const memberIds = [user.uid, ...invitedUsers];
+      const members = [
+        { uid: user.uid, name: userProfile?.fullName || 'Host', photoURL: userProfile?.photoURL || '' },
+        ...invitedUsers.map((uid) => { const u = allUsers.find((x) => x.id === uid); return { uid, name: u?.fullName || 'Friend', photoURL: u?.photoURL || '' }; }),
+      ];
+      const ref = await addDoc(collection(db, 'watchRooms'), {
+        name: watchRoomName.trim(),
+        hostId: user.uid,
+        hostName: userProfile?.fullName || 'Host',
+        memberIds, members,
+        videoId: null, videoTitle: null, videoThumb: null,
+        isPlaying: false, seekTo: 0, startedAt: 0,
+        updatedAt: serverTimestamp(), createdAt: serverTimestamp(),
+      });
+      for (const uid of invitedUsers) {
+        await addDoc(collection(db, 'notifications'), {
+          toUserId: uid, fromUserId: user.uid,
+          fromUsername: userProfile?.username || 'someone',
+          type: 'watch_invite', groupId: ref.id,
+          groupName: watchRoomName.trim(),
+          read: false, createdAt: serverTimestamp(),
+        });
+      }
+      const snap = await getDoc(ref);
+      setActiveWatchRoom({ id: ref.id, ...snap.data() } as WatchRoom);
+      setShowCreateWatch(false); setWatchRoomName(''); setInvitedUsers([]);
+    } catch (err: any) { setWatchCreateError(err.message); }
+    setCreatingWatch(false);
+  };
 
   const filteredUsers = allUsers.filter(
     (u) => (u.fullName?.toLowerCase().includes(inviteSearch.toLowerCase()) || u.username?.toLowerCase().includes(inviteSearch.toLowerCase())) && !invitedUsers.includes(u.id)
@@ -721,6 +1118,19 @@ export default function EntertainmentPage() {
     );
   }
 
+  // ── Active Watch Room View ───────────────────────────────────────────────
+  if (activeWatchRoom) {
+    const updated = watchRooms.find(r => r.id === activeWatchRoom.id) || activeWatchRoom;
+    return (
+      <WatchRoomView
+        room={updated}
+        user={user}
+        userProfile={userProfile}
+        onLeave={() => setActiveWatchRoom(null)}
+      />
+    );
+  }
+
   // ── Active Game Room View ─────────────────────────────────────────────────
   if (activeGameRoom) {
     const isHost = activeGameRoom.hostId === user.uid;
@@ -805,14 +1215,14 @@ export default function EntertainmentPage() {
           {/* Page header */}
           <div style={{ padding: '24px 20px 0' }}>
             <h1 style={{ fontSize: 26, fontWeight: 900, letterSpacing: -0.5, margin: '0 0 4px', background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>🎉 Entertainment</h1>
-            <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Play games and listen to music with friends</p>
+            <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>Music, watch parties, and games with friends</p>
           </div>
 
           {/* Tab switcher */}
           <div style={{ display: 'flex', margin: '20px 20px 0', background: 'rgba(255,255,255,0.03)', borderRadius: 16, padding: 4, border: '0.5px solid rgba(139,92,246,0.15)' }}>
-            {(['music', 'games'] as const).map((t) => (
-              <button type="button" key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: '10px 0', borderRadius: 12, border: 'none', fontFamily: 'Inter,sans-serif', fontWeight: 700, fontSize: 14, cursor: 'pointer', background: tab === t ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'transparent', color: tab === t ? 'white' : '#6b7280', transition: 'background 0.2s, color 0.2s' }}>
-                {t === 'music' ? '🎵 Music' : '🎮 Games'}
+            {(['music', 'watch', 'games'] as const).map((t) => (
+              <button type="button" key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: '10px 0', borderRadius: 12, border: 'none', fontFamily: 'Inter,sans-serif', fontWeight: 700, fontSize: 13, cursor: 'pointer', background: tab === t ? 'linear-gradient(135deg,#8b5cf6,#3b82f6)' : 'transparent', color: tab === t ? 'white' : '#6b7280', transition: 'background 0.2s, color 0.2s' }}>
+                {t === 'music' ? '🎵 Music' : t === 'watch' ? '🎬 Watch' : '🎮 Games'}
               </button>
             ))}
           </div>
@@ -847,6 +1257,54 @@ export default function EntertainmentPage() {
                           <p style={{ color: '#6b7280', fontSize: 12, margin: 0 }}>{r.currentTrack ? `▶ ${r.currentTrack.title.slice(0,30)}...` : 'No track'} · {r.members.length} listeners</p>
                         </div>
                         <span style={{ padding: '3px 10px', borderRadius: 20, background: r.currentTrack ? 'rgba(167,139,250,0.12)' : 'rgba(255,255,255,0.05)', color: r.currentTrack ? '#a78bfa' : '#4b5563', fontSize: 12, fontWeight: 600 }}>{r.currentTrack ? '🎵 Live' : 'Idle'}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
+
+            {/* ── WATCH TAB ── */}
+            {tab === 'watch' && (
+              <>
+                <button type="button" onClick={() => { setShowCreateWatch(true); setInvitedUsers([]); setInviteSearch(''); }} style={{ ...S.btn(true), width: '100%', padding: '14px', fontSize: 15, marginBottom: 20 }}>
+                  🎬 Create a Watch Party
+                </button>
+
+                <div style={{ ...S.card, padding: '18px 20px', marginBottom: 20 }}>
+                  <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 14 }}>How it works</p>
+                  {[['🎬','Create a room and invite friends'],['🔗','Paste any YouTube URL — movies, shorts, clips'],['📺','Everyone watches at the exact same time'],['⏯️','Host controls play, pause and seeking'],['💬','Chat together while watching']].map(([icon, text]) => (
+                    <div key={String(text)} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                      <span style={{ fontSize: 18, width: 28, textAlign: 'center' }}>{icon}</span>
+                      <span style={{ color: '#9ca3af', fontSize: 13 }}>{text}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {watchRooms.length > 0 && (
+                  <>
+                    <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>Your Rooms</p>
+                    {watchRooms.map((r) => (
+                      <div key={r.id} role="button" tabIndex={0} onClick={() => setActiveWatchRoom(r)} onKeyDown={(e) => e.key === 'Enter' && setActiveWatchRoom(r)}
+                        style={{ ...S.card, padding: 0, overflow: 'hidden', cursor: 'pointer', marginBottom: 10 }}>
+                        {r.videoThumb && (
+                          <div style={{ position: 'relative', height: 80, overflow: 'hidden' }}>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={r.videoThumb} alt="" style={{ width: '100%', objectFit: 'cover', filter: 'brightness(0.5)' }} />
+                            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 30%, rgba(10,10,15,0.9))' }} />
+                            <span style={{ position: 'absolute', top: 8, left: 10, fontSize: 10, padding: '3px 8px', borderRadius: 20, background: r.isPlaying ? 'rgba(34,197,94,0.9)' : 'rgba(0,0,0,0.7)', color: r.isPlaying ? 'white' : '#9ca3af', fontWeight: 700 }}>{r.isPlaying ? '▶ Live' : '⏸ Paused'}</span>
+                          </div>
+                        )}
+                        <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                          {!r.videoThumb && <span style={{ fontSize: 28 }}>🎬</span>}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ color: '#f3f4f6', fontWeight: 700, fontSize: 14, margin: 0 }}>{r.name}</p>
+                            <p style={{ color: '#6b7280', fontSize: 12, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {r.videoTitle ? `📺 ${r.videoTitle.slice(0, 35)}…` : 'No video loaded yet'} · {r.members.length} watching
+                            </p>
+                          </div>
+                          <span style={{ color: '#a78bfa', fontSize: 20 }}>›</span>
+                        </div>
                       </div>
                     ))}
                   </>
@@ -907,6 +1365,20 @@ export default function EntertainmentPage() {
         >
           <input value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="Room name (e.g. Late Night Vibes)" style={{ ...S.input, marginBottom: 12 }} />
           {musicCreateError && <p style={{ color: '#f87171', fontSize: 13, marginBottom: 10 }}>⚠️ {musicCreateError}</p>}
+        </InviteModal>
+      )}
+
+      {/* ── Watch Create Modal ── */}
+      {showCreateWatch && (
+        <InviteModal
+          title="🎬 New Watch Party"
+          onClose={() => setShowCreateWatch(false)}
+          onConfirm={createWatchRoom}
+          confirmLabel={creatingWatch ? 'Creating...' : `🎬 Create Room${invitedUsers.length ? ` with ${invitedUsers.length} friend${invitedUsers.length > 1 ? 's' : ''}` : ''}`}
+          confirmDisabled={!watchRoomName.trim() || creatingWatch}
+        >
+          <input value={watchRoomName} onChange={(e) => setWatchRoomName(e.target.value)} placeholder="Room name (e.g. Movie Night 🎬)" style={{ ...S.input, marginBottom: 12 }} />
+          {watchCreateError && <p style={{ color: '#f87171', fontSize: 13, marginBottom: 10 }}>⚠️ {watchCreateError}</p>}
         </InviteModal>
       )}
 
