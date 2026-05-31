@@ -43,6 +43,9 @@ export default function Search() {
   const [activeTab, setActiveTab] = useState<'users' | 'posts'>('users');
   const [pageLoading, setPageLoading] = useState(true);
   const [followingMap, setFollowingMap] = useState<Record<string, boolean>>({});
+  const [followerIds, setFollowerIds] = useState<string[]>([]);
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [loadingFollow, setLoadingFollow] = useState<string | null>(null);
   const { push } = useRouter();
 
   useEffect(() => {
