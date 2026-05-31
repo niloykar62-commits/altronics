@@ -23,6 +23,7 @@ import {
 } from 'firebase/firestore';
 import Image from 'next/image';
 import Navbar from '@/components/Navbar';
+import { applyTheme } from '@/components/ThemeProvider';
 
 // ─── Theme definitions ────────────────────────────────────────────────────────
 const THEMES = [
@@ -62,13 +63,6 @@ const THEMES = [
 
 type ThemeId = typeof THEMES[number]['id'];
 
-function applyTheme(id: ThemeId) {
-  const theme = THEMES.find(t => t.id === id);
-  if (!theme) return;
-  const root = document.documentElement;
-  Object.entries(theme.vars).forEach(([k, v]) => root.style.setProperty(k, v));
-  localStorage.setItem('altronics-theme', id);
-}
 
 export default function Profile() {
   const [user, setUser] = useState<any>(null);
