@@ -27,7 +27,10 @@ export default function Feed() {
   const [editingPost, setEditingPost] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [repostingId, setRepostingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('foryou');
+  const [activeTab, setActiveTab] = useState('following');
+  const [followingIds, setFollowingIds] = useState<string[]>([]);   // UIDs this user follows
+  const [followerIds, setFollowerIds] = useState<string[]>([]);     // UIDs who follow this user
+  const [storyUsers, setStoryUsers] = useState<any[]>([]);          // following users with stories
   const { push } = useRouter();
 
   useEffect(() => {
@@ -36,19 +39,57 @@ export default function Feed() {
       setUser(firebaseUser);
       try {
         const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (profileDoc.exists()) setUserProfile(profileDoc.data());
-        await loadPosts();
+        if (profileDoc.exists()) {
+          const profileData = profileDoc.data();
+          setUserProfile(profileData);
+          const following: string[] = profileData.following || [];
+          const followers: string[] = profileData.followers || [];
+          setFollowingIds(following);
+          setFollowerIds(followers);
+          await loadPosts(following);
+          await loadStoryUsers(following, firebaseUser.uid);
+        } else {
+          await loadPosts([]);
+        }
       } catch (err) { console.error(err); }
       setPageLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  const loadPosts = async () => {
+  const loadPosts = async (following?: string[]) => {
     try {
       const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
       const snapshot = await getDocs(q);
-      setPosts(snapshot.docs.map((d) => ({ id: d.id, ...d.data(), likes: d.data().likes || [], reposts: d.data().reposts || [] })));
+      const all = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), likes: d.data().likes || [], reposts: d.data().reposts || [] }));
+      setPosts(all);
+    } catch (err) { console.error(err); }
+  };
+
+  // Load users you follow who have posted a story in last 24h
+  const loadStoryUsers = async (following: string[], myUid: string) => {
+    if (following.length === 0) { setStoryUsers([]); return; }
+    try {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      const seenUids = new Set<string>();
+      const users: any[] = [];
+      // Add self first
+      seenUids.add(myUid);
+      users.push({ uid: myUid, isSelf: true });
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const uid: string = data.userId;
+        if (!seenUids.has(uid) && following.includes(uid)) {
+          const createdAt = data.createdAt?.toDate ? data.createdAt.toDate() : null;
+          if (createdAt && createdAt > since) {
+            seenUids.add(uid);
+            users.push({ uid, fullName: data.fullName || 'User', username: data.username || uid });
+          }
+        }
+      });
+      setStoryUsers(users);
     } catch (err) { console.error(err); }
   };
 
@@ -97,7 +138,7 @@ export default function Feed() {
         reposts: [],
       });
       setContent(''); setImage(null); setImagePreview(null);
-      await loadPosts();
+      await loadPosts(followingIds);
     } catch (err: any) {
       console.error('Post error:', err);
       alert('Failed to post: ' + err.message);
@@ -107,7 +148,7 @@ export default function Feed() {
 
   const deletePost = async (postId: string) => {
     if (!confirm('Delete this post?')) return;
-    try { await deleteDoc(doc(db, 'posts', postId)); await loadPosts(); }
+    try { await deleteDoc(doc(db, 'posts', postId)); await loadPosts(followingIds); }
     catch (err) { console.error(err); }
   };
 
@@ -115,7 +156,7 @@ export default function Feed() {
     if (!editContent.trim()) return;
     try {
       await updateDoc(doc(db, 'posts', postId), { content: editContent.trim(), edited: true });
-      setEditingPost(null); await loadPosts();
+      setEditingPost(null); await loadPosts(followingIds);
     } catch (err) { console.error(err); }
   };
 
@@ -132,7 +173,7 @@ export default function Feed() {
     try {
       await updateDoc(doc(db, 'posts', post.id), { likes: alreadyLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
       if (!alreadyLiked) await sendNotification(post.userId, 'like');
-      await loadPosts();
+      await loadPosts(followingIds);
     } catch (err) { console.error(err); }
   };
 
@@ -158,7 +199,7 @@ export default function Feed() {
       });
       await updateDoc(doc(db, 'posts', post.id), { reposts: arrayUnion(user.uid) });
       await sendNotification(post.userId, 'repost');
-      await loadPosts();
+      await loadPosts(followingIds);
     } catch (err) { console.error(err); }
     setRepostingId(null);
   };
@@ -188,6 +229,24 @@ export default function Feed() {
     } catch (err) { console.error(err); }
   };
 
+  // ── Filter posts based on active tab ─────────────────────────────────────
+  const visiblePosts = (() => {
+    if (activeTab === 'following') {
+      // Only posts from people you follow + your own
+      return posts.filter((p) => p.userId === user?.uid || followingIds.includes(p.userId));
+    }
+    if (activeTab === 'foryou') {
+      // For You = following + followers posts (wider circle)
+      const socialIds = [...new Set([...followingIds, ...followerIds])];
+      return posts.filter((p) => p.userId === user?.uid || socialIds.includes(p.userId));
+    }
+    if (activeTab === 'trending') {
+      // Trending = all posts sorted by likes
+      return [...posts].sort((a, b) => (b.likes?.length || 0) - (a.likes?.length || 0));
+    }
+    return posts;
+  })();
+
   if (pageLoading) return (
     <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
       <span style={{ fontSize: 40 }}>⚡</span>
@@ -211,18 +270,35 @@ export default function Feed() {
           ))}
         </div>
 
-        {/* Stories Row */}
-        <div style={{ display: 'flex', gap: 16, padding: '16px 20px', overflowX: 'auto', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
-          {[{ emoji: '➕', name: 'Your Story', add: true }, { emoji: '🎮', name: 'alex_x' }, { emoji: '🎨', name: 'nova' }, { emoji: '🚀', name: 'kai.dev' }, { emoji: '🌙', name: 'luna' }].map((s, i) => (
-            <button type="button" key={i} aria-label={`View ${s.name}'s story`} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
-              <div style={{ width: 56, height: 56, borderRadius: '50%', padding: 2, background: s.add ? 'rgba(139,92,246,0.2)' : 'linear-gradient(135deg,#8b5cf6,#3b82f6)' }}>
-                <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0d0d14', border: '2px solid #0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>
-                  {s.emoji}
+        {/* Stories Row — real users you follow */}
+        <div style={{ display: 'flex', gap: 14, padding: '14px 20px', overflowX: 'auto', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+          {/* Your story — always first */}
+          <button type="button" aria-label="Add your story" onClick={() => push('/stories')}
+            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(139,92,246,0.15)', border: '2px dashed rgba(139,92,246,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>➕</div>
+            <span style={{ fontSize: 12, color: '#6b7280', fontWeight: 500 }}>Your Story</span>
+          </button>
+
+          {/* Following users with stories */}
+          {storyUsers.filter(s => !s.isSelf).map((s) => (
+            <button type="button" key={s.uid} aria-label={`View ${s.fullName}'s story`}
+              onClick={() => push(`/stories?user=${s.uid}`)}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, flexShrink: 0, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}>
+              <div style={{ width: 56, height: 56, borderRadius: '50%', padding: 2, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)' }}>
+                <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: '#0d0d14', border: '2px solid #0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 18, color: '#a78bfa' }}>
+                  {s.fullName?.[0]?.toUpperCase() || 'U'}
                 </div>
               </div>
-              <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500 }}>{s.name}</span>
+              <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500, maxWidth: 56, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.username}</span>
             </button>
           ))}
+
+          {/* Empty state if no stories */}
+          {storyUsers.filter(s => !s.isSelf).length === 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', color: '#4b5563', fontSize: 13, paddingLeft: 4 }}>
+              Follow people to see their stories here
+            </div>
+          )}
         </div>
 
         {/* Create Post */}
@@ -261,12 +337,26 @@ export default function Feed() {
         </div>
 
         {/* Posts */}
-        {posts.length === 0 ? (
+        {visiblePosts.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px', color: '#6b7280' }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>✨</div>
-            <p>No posts yet. Be the first!</p>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>
+              {activeTab === 'following' ? '👥' : activeTab === 'foryou' ? '✨' : '🔥'}
+            </div>
+            <p style={{ fontSize: 15, fontWeight: 600, color: '#9ca3af', marginBottom: 8 }}>
+              {activeTab === 'following' ? 'No posts from people you follow' :
+               activeTab === 'foryou' ? 'Nothing here yet' : 'No trending posts yet'}
+            </p>
+            <p style={{ fontSize: 13 }}>
+              {activeTab === 'following' ? 'Follow people from Search to see their posts here.' : 'Be the first to post!'}
+            </p>
+            {activeTab === 'following' && (
+              <button type="button" onClick={() => push('/search')}
+                style={{ marginTop: 16, padding: '10px 24px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                Find People to Follow
+              </button>
+            )}
           </div>
-        ) : posts.map((post) => {
+        ) : visiblePosts.map((post) => {
           const liked = post.likes?.includes(user?.uid);
           const likeCount = post.likes?.length || 0;
           const isOwner = post.userId === user?.uid;
