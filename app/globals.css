@@ -102,3 +102,25 @@ body {
 .tag-blue { background: rgba(59,130,246,0.15); color: #60a5fa; border: 0.5px solid rgba(59,130,246,0.3); }
 .tag-pink { background: rgba(236,72,153,0.15); color: #f472b6; border: 0.5px solid rgba(236,72,153,0.3); }
 .tag-green { background: rgba(52,211,153,0.15); color: #34d399; border: 0.5px solid rgba(52,211,153,0.3); }
+
+/* ── Theme transitions ──────────────────────────────────────────────────── */
+*, *::before, *::after {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.2s ease;
+}
+/* Don't animate transforms or layout properties */
+button, a, input { transition: background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease; }
+
+/* ── Toggle animations ──────────────────────────────────────────────────── */
+.toggle-track { transition: background 0.25s ease !important; }
+.toggle-thumb { transition: left 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) !important; }
+
+/* ── Settings section open animation ───────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.section-body { animation: fadeIn 0.2s ease; }
+
+/* ── Theme card hover ───────────────────────────────────────────────────── */
+.theme-card { transition: transform 0.2s ease, border-color 0.2s ease !important; }
+.theme-card:hover { transform: scale(1.04); }
