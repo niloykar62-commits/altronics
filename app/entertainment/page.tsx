@@ -61,6 +61,57 @@ function extractVideoId(url: string): string | null {
   return m ? m[1] : null;
 }
 
+// ─── Multi-platform URL detector ─────────────────────────────────────────────
+type VideoSource =
+  | { type: 'youtube';     videoId: string;  title?: string; thumbnail?: string }
+  | { type: 'vimeo';       videoId: string;  title?: string; thumbnail?: string }
+  | { type: 'dailymotion'; videoId: string;  title?: string; thumbnail?: string }
+  | { type: 'twitch';      channel: string;  title?: string; thumbnail?: string }
+  | { type: 'direct';      url: string;      title?: string; thumbnail?: string }
+  | null;
+
+async function detectVideoSource(url: string): Promise<VideoSource | null> {
+  const u = url.trim();
+  // YouTube
+  const ytId = extractVideoId(u);
+  if (ytId) {
+    const info = await getVideoInfo(ytId);
+    return { type: 'youtube', videoId: ytId, title: info.title, thumbnail: info.thumbnail };
+  }
+  // Vimeo
+  const vimeoMatch = u.match(/vimeo\.com\/(\d+)/);
+  if (vimeoMatch) {
+    const id = vimeoMatch[1];
+    try {
+      const res = await fetch(`https://vimeo.com/api/v2/video/${id}.json`);
+      const data = await res.json();
+      return { type: 'vimeo', videoId: id, title: data[0]?.title || 'Vimeo Video', thumbnail: data[0]?.thumbnail_medium };
+    } catch { return { type: 'vimeo', videoId: id, title: 'Vimeo Video' }; }
+  }
+  // Dailymotion
+  const dmMatch = u.match(/dailymotion\.com\/video\/([a-zA-Z0-9]+)/);
+  if (dmMatch) {
+    const id = dmMatch[1];
+    try {
+      const res = await fetch(`https://api.dailymotion.com/video/${id}?fields=title,thumbnail_360_url`);
+      const data = await res.json();
+      return { type: 'dailymotion', videoId: id, title: data.title || 'Dailymotion Video', thumbnail: data.thumbnail_360_url };
+    } catch { return { type: 'dailymotion', videoId: id, title: 'Dailymotion Video' }; }
+  }
+  // Twitch — channel or VOD
+  const twitchMatch = u.match(/twitch\.tv\/([a-zA-Z0-9_]+)/);
+  if (twitchMatch) {
+    const channel = twitchMatch[1];
+    return { type: 'twitch', channel, title: `${channel} on Twitch`, thumbnail: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channel.toLowerCase()}-320x180.jpg` };
+  }
+  // Direct video URL — .mp4 .webm .m3u8 .mov .ogg
+  if (/\.(mp4|webm|m3u8|mov|ogg)(\?.*)?$/i.test(u) || u.includes('blob:')) {
+    const filename = u.split('/').pop()?.split('?')[0] || 'Video';
+    return { type: 'direct', url: u, title: decodeURIComponent(filename) };
+  }
+  return null;
+}
+
 async function getVideoInfo(videoId: string): Promise<{ title: string; thumbnail: string }> {
   try {
     const res = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
@@ -524,9 +575,13 @@ interface WatchRoom {
   hostName: string;
   memberIds: string[];
   members: { uid: string; name: string; photoURL?: string }[];
-  videoId: string | null;
+  // video source
+  videoId: string | null;       // youtube video id
   videoTitle: string | null;
   videoThumb: string | null;
+  videoType: 'youtube' | 'vimeo' | 'dailymotion' | 'twitch' | 'direct' | null;
+  videoChannel: string | null;  // twitch channel
+  directUrl: string | null;     // direct mp4/webm/m3u8 url
   isPlaying: boolean;
   seekTo: number;
   startedAt: number;
@@ -544,128 +599,151 @@ interface WatchChatMsg {
 }
 
 function WatchPlayer({ room, user, isHost }: { room: WatchRoom; user: any; isHost: boolean }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<any>(null);
-  const [ready, setReady] = useState(false);
-  const [paused, setPaused] = useState(!room.isPlaying);
+  const ytContainerRef = useRef<HTMLDivElement>(null);
+  const ytPlayerRef = useRef<any>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const syncRef = useRef<any>(null);
+  const [ready, setReady] = useState(false);
+  const vType = room.videoType || 'youtube';
 
+  // ── YouTube init ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if ((window as any).YT?.Player) { initPlayer(); return; }
+    if (vType !== 'youtube') return;
+    const init = () => {
+      if (!ytContainerRef.current || !room.videoId) return;
+      ytPlayerRef.current?.destroy?.();
+      ytPlayerRef.current = new (window as any).YT.Player(ytContainerRef.current, {
+        height: '100%', width: '100%', videoId: room.videoId,
+        playerVars: { autoplay: room.isPlaying ? 1 : 0, controls: isHost ? 1 : 0, rel: 0, modestbranding: 1 },
+        events: {
+          onReady: (e: any) => {
+            setReady(true);
+            const elapsed = room.isPlaying ? (Date.now() - room.startedAt) / 1000 : room.seekTo;
+            e.target.seekTo(elapsed, true);
+            if (room.isPlaying) e.target.playVideo(); else e.target.pauseVideo();
+          },
+          onStateChange: (e: any) => { if (!isHost) return; if (e.data === 1) syncPlay(); if (e.data === 2) syncPause(); },
+        },
+      });
+    };
+    if ((window as any).YT?.Player) { init(); return; }
     if (!document.getElementById('yt-api-watch')) {
-      const tag = document.createElement('script');
-      tag.id = 'yt-api-watch';
-      tag.src = 'https://www.youtube.com/iframe_api';
-      document.head.appendChild(tag);
+      const tag = document.createElement('script'); tag.id = 'yt-api-watch';
+      tag.src = 'https://www.youtube.com/iframe_api'; document.head.appendChild(tag);
     }
     const prev = (window as any).onYouTubeIframeAPIReady;
-    (window as any).onYouTubeIframeAPIReady = () => { prev?.(); initPlayer(); };
-    return () => { playerRef.current?.destroy?.(); clearInterval(syncRef.current); };
+    (window as any).onYouTubeIframeAPIReady = () => { prev?.(); init(); };
+    return () => { ytPlayerRef.current?.destroy?.(); clearInterval(syncRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const initPlayer = () => {
-    if (!containerRef.current || !room.videoId) return;
-    playerRef.current?.destroy?.();
-    playerRef.current = new (window as any).YT.Player(containerRef.current, {
-      height: '100%', width: '100%',
-      videoId: room.videoId,
-      playerVars: { autoplay: room.isPlaying ? 1 : 0, controls: isHost ? 1 : 0, rel: 0, modestbranding: 1, iv_load_policy: 3 },
-      events: {
-        onReady: (e: any) => {
-          setReady(true);
-          // Seek to current position
-          if (room.isPlaying) {
-            const elapsed = (Date.now() - room.startedAt) / 1000;
-            e.target.seekTo(elapsed, true);
-            e.target.playVideo();
-          } else {
-            e.target.seekTo(room.seekTo, true);
-            e.target.pauseVideo();
-          }
-        },
-        onStateChange: (e: any) => {
-          if (!isHost) return;
-          if (e.data === 1) hostSyncPlay();   // playing
-          if (e.data === 2) hostSyncPause();  // paused
-        },
-      },
-    });
-  };
-
-  // When room state changes, sync non-host viewers
+  // Sync YT for non-host when room state changes
   useEffect(() => {
-    if (!ready || !playerRef.current || isHost) return;
-    if (room.isPlaying) {
-      const elapsed = (Date.now() - room.startedAt) / 1000;
-      playerRef.current.seekTo(elapsed, true);
-      playerRef.current.playVideo();
-      setPaused(false);
-    } else {
-      playerRef.current.seekTo(room.seekTo, true);
-      playerRef.current.pauseVideo();
-      setPaused(true);
-    }
-  }, [room.isPlaying, room.startedAt, ready]);
+    if (vType !== 'youtube' || !ready || isHost) return;
+    const elapsed = room.isPlaying ? (Date.now() - room.startedAt) / 1000 : room.seekTo;
+    ytPlayerRef.current?.seekTo(elapsed, true);
+    if (room.isPlaying) ytPlayerRef.current?.playVideo(); else ytPlayerRef.current?.pauseVideo();
+  }, [room.isPlaying, room.startedAt, ready, vType]);
 
-  // Periodic drift correction for guests
+  // Sync YT drift
   useEffect(() => {
-    if (!ready || isHost) return;
+    if (vType !== 'youtube' || !ready || isHost) return;
     syncRef.current = setInterval(() => {
-      if (!room.isPlaying || !playerRef.current) return;
+      if (!room.isPlaying) return;
       const elapsed = (Date.now() - room.startedAt) / 1000;
-      const cur = playerRef.current.getCurrentTime?.() || 0;
-      if (Math.abs(cur - elapsed) > 4) playerRef.current.seekTo(elapsed, true);
+      const cur = ytPlayerRef.current?.getCurrentTime?.() || 0;
+      if (Math.abs(cur - elapsed) > 4) ytPlayerRef.current?.seekTo(elapsed, true);
     }, 5000);
     return () => clearInterval(syncRef.current);
-  }, [ready, isHost, room.isPlaying, room.startedAt]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, vType, room.isPlaying, room.startedAt]);
 
-  // When videoId changes (host picks new video)
+  // ── Direct video (mp4/webm/m3u8) sync ─────────────────────────────────────
   useEffect(() => {
-    if (!ready || !room.videoId) return;
-    playerRef.current?.loadVideoById(room.videoId);
-    setTimeout(() => {
-      if (room.isPlaying) {
-        const elapsed = (Date.now() - room.startedAt) / 1000;
-        playerRef.current?.seekTo(elapsed, true);
-        playerRef.current?.playVideo();
+    if (vType !== 'direct' || !videoRef.current) return;
+    const vid = videoRef.current;
+    const syncDirect = () => {
+      if (!isHost) {
+        const elapsed = room.isPlaying ? (Date.now() - room.startedAt) / 1000 : room.seekTo;
+        if (Math.abs(vid.currentTime - elapsed) > 2) vid.currentTime = elapsed;
+        if (room.isPlaying && vid.paused) vid.play().catch(() => {});
+        if (!room.isPlaying && !vid.paused) vid.pause();
       }
-    }, 800);
-  }, [room.videoId, ready]);
+    };
+    syncDirect();
+    // HLS support
+    if (room.directUrl?.endsWith('.m3u8') || room.directUrl?.includes('.m3u8')) {
+      if ((window as any).Hls?.isSupported()) {
+        const hls = new (window as any).Hls();
+        hls.loadSource(room.directUrl!);
+        hls.attachMedia(vid);
+        return () => hls.destroy();
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vType, room.isPlaying, room.startedAt, room.seekTo, room.directUrl]);
 
-  const hostSyncPlay = async () => {
-    const cur = playerRef.current?.getCurrentTime?.() || 0;
-    await updateDoc(doc(db, 'watchRooms', room.id), {
-      isPlaying: true,
-      startedAt: Date.now() - cur * 1000,
-      seekTo: cur,
-      updatedAt: serverTimestamp(),
-    });
-    setPaused(false);
+  const syncPlay = async () => {
+    const cur = vType === 'youtube' ? (ytPlayerRef.current?.getCurrentTime?.() || 0) : (videoRef.current?.currentTime || 0);
+    await updateDoc(doc(db, 'watchRooms', room.id), { isPlaying: true, startedAt: Date.now() - cur * 1000, seekTo: cur, updatedAt: serverTimestamp() });
+  };
+  const syncPause = async () => {
+    const cur = vType === 'youtube' ? (ytPlayerRef.current?.getCurrentTime?.() || 0) : (videoRef.current?.currentTime || 0);
+    await updateDoc(doc(db, 'watchRooms', room.id), { isPlaying: false, seekTo: cur, updatedAt: serverTimestamp() });
   };
 
-  const hostSyncPause = async () => {
-    const cur = playerRef.current?.getCurrentTime?.() || 0;
-    await updateDoc(doc(db, 'watchRooms', room.id), {
-      isPlaying: false,
-      seekTo: cur,
-      updatedAt: serverTimestamp(),
-    });
-    setPaused(true);
-  };
+  if (!room.videoId && !room.directUrl && !room.videoChannel) return null;
 
-  if (!room.videoId) return null;
+  const platformLabel = { youtube: 'YouTube', vimeo: 'Vimeo', dailymotion: 'Dailymotion', twitch: 'Twitch', direct: 'Direct' }[vType] || 'Video';
+  const platformColor = { youtube: '#f87171', vimeo: '#60a5fa', dailymotion: '#fbbf24', twitch: '#a78bfa', direct: '#34d399' }[vType] || '#a78bfa';
 
   return (
     <div style={{ ...S.card, overflow: 'hidden', marginBottom: 16 }}>
       <div style={{ position: 'relative', width: '100%', paddingTop: '56.25%', background: '#000' }}>
-        <div ref={containerRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />
+        {/* YouTube */}
+        {vType === 'youtube' && <div ref={ytContainerRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }} />}
+
+        {/* Vimeo */}
+        {vType === 'vimeo' && room.videoId && (
+          <iframe style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
+            src={`https://player.vimeo.com/video/${room.videoId}?autoplay=1&title=0&byline=0&portrait=0`}
+            allow="autoplay; fullscreen; picture-in-picture" allowFullScreen title="Vimeo" />
+        )}
+
+        {/* Dailymotion */}
+        {vType === 'dailymotion' && room.videoId && (
+          <iframe style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
+            src={`https://www.dailymotion.com/embed/video/${room.videoId}?autoplay=1&ui-logo=0`}
+            allow="autoplay; fullscreen" allowFullScreen title="Dailymotion" />
+        )}
+
+        {/* Twitch */}
+        {vType === 'twitch' && room.videoChannel && (
+          <iframe style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
+            src={`https://player.twitch.tv/?channel=${room.videoChannel}&parent=${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}&autoplay=true&muted=false`}
+            allow="autoplay; fullscreen" allowFullScreen title="Twitch" />
+        )}
+
+        {/* Direct MP4 / WebM / M3U8 */}
+        {vType === 'direct' && room.directUrl && (
+          <video ref={videoRef} controls={isHost}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#000' }}
+            onPlay={isHost ? syncPlay : undefined}
+            onPause={isHost ? syncPause : undefined}
+            onSeeked={isHost ? syncPlay : undefined}>
+            <source src={room.directUrl} />
+            Your browser does not support this video format.
+          </video>
+        )}
       </div>
+
       <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 20, background: 'rgba(255,255,255,0.06)', color: platformColor, fontWeight: 700, flexShrink: 0 }}>{platformLabel}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p style={{ color: '#f3f4f6', fontWeight: 700, fontSize: 13, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{room.videoTitle}</p>
           <p style={{ color: isHost ? '#a78bfa' : '#6b7280', fontSize: 12, margin: 0 }}>{isHost ? '🎬 You control playback' : `🔗 Synced with ${room.hostName}`}</p>
         </div>
-        {!isHost && (
+        {!isHost && vType !== 'twitch' && (
           <span style={{ fontSize: 11, padding: '3px 9px', borderRadius: 20, background: room.isPlaying ? 'rgba(34,197,94,0.1)' : 'rgba(255,255,255,0.05)', color: room.isPlaying ? '#34d399' : '#6b7280', fontWeight: 600 }}>
             {room.isPlaying ? '▶ Live' : '⏸ Paused'}
           </span>
@@ -697,22 +775,31 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
   }, [room.id]);
 
   const loadVideo = async () => {
-    const vid = extractVideoId(urlInput.trim());
-    if (!vid) { setUrlError('Invalid YouTube URL. Try: https://youtube.com/watch?v=...'); return; }
+    const raw = urlInput.trim();
+    if (!raw) return;
     setLoadingUrl(true); setUrlError('');
     try {
-      const info = await getVideoInfo(vid);
-      await updateDoc(doc(db, 'watchRooms', room.id), {
-        videoId: vid,
-        videoTitle: info.title,
-        videoThumb: info.thumbnail,
-        isPlaying: true,
+      const source = await detectVideoSource(raw);
+      if (!source) { setUrlError('Unsupported URL. Try YouTube, Vimeo, Dailymotion, Twitch, or a direct .mp4/.webm/.m3u8 link.'); setLoadingUrl(false); return; }
+      const update: any = {
+        videoType: source.type,
+        videoTitle: source.title || raw,
+        videoThumb: source.type !== 'direct' ? (source as any).thumbnail || null : null,
+        isPlaying: source.type !== 'twitch', // Twitch is always live
         startedAt: Date.now(),
         seekTo: 0,
         updatedAt: serverTimestamp(),
-      });
+        // clear old fields
+        videoId: null, videoChannel: null, directUrl: null,
+      };
+      if (source.type === 'youtube')     update.videoId = source.videoId;
+      if (source.type === 'vimeo')       update.videoId = source.videoId;
+      if (source.type === 'dailymotion') update.videoId = source.videoId;
+      if (source.type === 'twitch')      update.videoChannel = source.channel;
+      if (source.type === 'direct')      update.directUrl = source.url;
+      await updateDoc(doc(db, 'watchRooms', room.id), update);
       setUrlInput('');
-    } catch (err: any) { setUrlError('Failed to load video: ' + err.message); }
+    } catch (err: any) { setUrlError('Failed to load: ' + err.message); }
     setLoadingUrl(false);
   };
 
@@ -733,6 +820,7 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
     <>
       <Navbar />
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box}`}</style>
+      <script src="https://cdn.jsdelivr.net/npm/hls.js@latest" async />
       <div style={S.page}>
         {/* Header */}
         <div style={{ background: 'rgba(10,10,15,0.95)', backdropFilter: 'blur(20px)', borderBottom: '0.5px solid rgba(139,92,246,0.15)', padding: '14px 20px', position: 'sticky', top: 56, zIndex: 10 }}>
@@ -775,7 +863,7 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
                   value={urlInput}
                   onChange={(e) => { setUrlInput(e.target.value); setUrlError(''); }}
                   onKeyDown={(e) => e.key === 'Enter' && loadVideo()}
-                  placeholder="Paste any YouTube URL…"
+                  placeholder="YouTube, Vimeo, Dailymotion, Twitch, or .mp4/.webm/.m3u8 URL…"
                   style={{ ...S.input, flex: 1, fontSize: 13 }}
                 />
                 <button type="button" onClick={loadVideo} disabled={!urlInput.trim() || loadingUrl}
@@ -784,7 +872,7 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
                 </button>
               </div>
               {urlError && <p style={{ color: '#f87171', fontSize: 12, marginTop: 8 }}>⚠️ {urlError}</p>}
-              <p style={{ color: '#4b5563', fontSize: 11, marginTop: 8 }}>Works with any YouTube link — movies, shorts, clips, music videos</p>
+              <p style={{ color: '#4b5563', fontSize: 11, marginTop: 8 }}>Supports YouTube · Vimeo · Dailymotion · Twitch · Direct .mp4 / .webm / .m3u8 links</p>
             </div>
           )}
 
@@ -1273,7 +1361,7 @@ export default function EntertainmentPage() {
 
                 <div style={{ ...S.card, padding: '18px 20px', marginBottom: 20 }}>
                   <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 14 }}>How it works</p>
-                  {[['🎬','Create a room and invite friends'],['🔗','Paste any YouTube URL — movies, shorts, clips'],['📺','Everyone watches at the exact same time'],['⏯️','Host controls play, pause and seeking'],['💬','Chat together while watching']].map(([icon, text]) => (
+                  {[['🎬','Create a room and invite friends'],['▶️','YouTube, Vimeo, Dailymotion & Twitch streams'],['📁','Or paste any direct .mp4 / .webm / .m3u8 link'],['📺','Everyone watches at the exact same time'],['⏯️','Host controls play, pause and seeking'],['💬','Chat together while watching']].map(([icon, text]) => (
                     <div key={String(text)} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                       <span style={{ fontSize: 18, width: 28, textAlign: 'center' }}>{icon}</span>
                       <span style={{ color: '#9ca3af', fontSize: 13 }}>{text}</span>
