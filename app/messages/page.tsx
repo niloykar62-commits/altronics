@@ -3,8 +3,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { auth, db, storage } from '@/lib/firebase';
-import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { auth, db } from '@/lib/firebase';
+const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, addDoc, getDocs, orderBy,
@@ -40,11 +41,13 @@ export default function Messages() {
   const [editingGroupName, setEditingGroupName] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [addMemberSearch, setAddMemberSearch] = useState('');
+  const [followingIds, setFollowingIds] = useState<string[]>([]);
+  const [followerIds, setFollowerIds] = useState<string[]>([]);
   const [replyingTo, setReplyingTo] = useState<any>(null);       // message being replied to
   const [mentionQuery, setMentionQuery] = useState('');           // text after # in input
   const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]); // users shown in dropdown
   const inputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
+  const { push } = useRouter();
 
   // ── Emoji state ───────────────────────────────────────────────────────────
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -77,10 +80,15 @@ export default function Messages() {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) { router.push('/login'); return; }
+      if (!firebaseUser) { push('/login'); return; }
       setUser(firebaseUser);
       const profileDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-      if (profileDoc.exists()) setUserProfile(profileDoc.data());
+      if (profileDoc.exists()) {
+        const pdata = profileDoc.data();
+        setUserProfile(pdata);
+        setFollowingIds(pdata.following || []);
+        setFollowerIds(pdata.followers || []);
+      }
       await loadAllUsers(firebaseUser.uid);
       await loadGroups(firebaseUser.uid);
       setPageLoading(false);
@@ -453,7 +461,12 @@ export default function Messages() {
     setSelectedMembers((prev) => prev.includes(uid) ? prev.filter((id) => id !== uid) : [...prev, uid]);
   };
 
-  const filteredUsers = allUsers.filter((u: any) =>
+  // Only show users you follow OR who follow you (social connections)
+  const socialUsers = allUsers.filter((u: any) =>
+    followingIds.includes(u.id) || followerIds.includes(u.id)
+  );
+  const filteredUsers = socialUsers.filter((u: any) =>
+    !searchQuery.trim() ||
     u.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.fullName?.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -581,47 +594,48 @@ export default function Messages() {
 
   const sendImage = async () => {
     if (!pendingImageFile || !user || !selectedChat) return;
+    if (!CLOUD_NAME || !UPLOAD_PRESET) { alert('Cloudinary not configured.'); return; }
     const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
-    const path = `chat-images/${selectedChat.id}/${Date.now()}_${pendingImageFile.name}`;
-    const fileRef = storageRef(storage, path);
-    const uploadTask = uploadBytesResumable(fileRef, pendingImageFile);
-
-    setImageUploadProgress(0);
-
-    uploadTask.on(
-      'state_changed',
-      (snapshot) => {
-        const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100);
-        setImageUploadProgress(pct);
-      },
-      (err) => {
-        console.error(err);
-        alert('Upload failed: ' + err.message);
-        setImageUploadProgress(null);
-      },
-      async () => {
-        const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-        await addDoc(collection(db, collectionName, selectedChat.id, 'messages'), {
-          senderId: user.uid,
-          senderUsername: userProfile?.username || 'me',
-          senderFullName: userProfile?.fullName || 'User',
-          content: newMessage.trim() || '',
-          imageUrl: downloadURL,
-          createdAt: serverTimestamp(),
+    try {
+      setImageUploadProgress(10);
+      const formData = new FormData();
+      formData.append('file', pendingImageFile);
+      formData.append('upload_preset', UPLOAD_PRESET!);
+      formData.append('folder', 'chat_images');
+      setImageUploadProgress(40);
+      const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: 'POST', body: formData });
+      const data = await res.json();
+      setImageUploadProgress(80);
+      if (!data.secure_url) throw new Error(data.error?.message || 'Upload failed');
+      const imageUrl: string = data.secure_url;
+      await addDoc(collection(db, collectionName, selectedChat.id, 'messages'), {
+        senderId: user.uid,
+        senderUsername: userProfile?.username || 'me',
+        senderFullName: userProfile?.fullName || 'User',
+        content: newMessage.trim() || '',
+        imageUrl,
+        type: 'image',
+        createdAt: serverTimestamp(),
+        ...(replyingTo ? { replyTo: { id: replyingTo.id, content: replyingTo.content || '📷 Photo', senderUsername: replyingTo.senderUsername } } : {}),
+      });
+      if (selectedChat.type === 'dm') {
+        await addDoc(collection(db, 'notifications'), {
+          toUserId: selectedChat.otherUser.id, fromUserId: user.uid,
+          fromUsername: userProfile?.username || 'someone',
+          type: 'message', read: false, createdAt: serverTimestamp(),
         });
-        if (selectedChat.type === 'dm') {
-          await addDoc(collection(db, 'notifications'), {
-            toUserId: selectedChat.otherUser.id, fromUserId: user.uid,
-            fromUsername: userProfile?.username || 'someone',
-            type: 'message', read: false, createdAt: serverTimestamp(),
-          });
-        }
-        cancelImagePreview();
-        setNewMessage('');
-        await loadMessages(collectionName, selectedChat.id);
-        if (selectedChat.type === 'dm') await markMessagesAsSeen(collectionName, selectedChat.id);
       }
-    );
+      setImageUploadProgress(100);
+      cancelImagePreview();
+      setNewMessage('');
+      setReplyingTo(null);
+      await loadMessages(collectionName, selectedChat.id);
+      if (selectedChat.type === 'dm') await markMessagesAsSeen(collectionName, selectedChat.id);
+    } catch (err: any) {
+      console.error('Image upload error:', err);
+      alert('Upload failed: ' + err.message);
+    }
+    setImageUploadProgress(null);
   };
 
   // ── Delete a message ──────────────────────────────────────────────────────
@@ -675,7 +689,7 @@ export default function Messages() {
                 Add Members ({selectedMembers.length} selected)
               </label>
               <div style={{ maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {allUsers.map((u: any) => {
+                {allUsers.filter((u: any) => followingIds.includes(u.id) || followerIds.includes(u.id)).map((u: any) => {
                   const isSelected = selectedMembers.includes(u.id);
                   return (
                     <div key={u.id} onClick={() => toggleMember(u.id)}
@@ -746,7 +760,24 @@ export default function Messages() {
 
             <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 80 }}>
               {activeTab === 'dms' ? (
-                filteredUsers.map((u: any) => (
+                filteredUsers.length === 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '40px 20px', color: '#6b7280', textAlign: 'center', gap: 12 }}>
+                    <p style={{ fontSize: 36 }}>{searchQuery ? '🔍' : '👥'}</p>
+                    <p style={{ fontSize: 14, fontWeight: 600, color: '#9ca3af' }}>
+                      {searchQuery ? `No results for "${searchQuery}"` : 'No connections yet'}
+                    </p>
+                    <p style={{ fontSize: 13 }}>
+                      {searchQuery ? 'Try a different name' : 'Follow people from Search to start messaging them'}
+                    </p>
+                    {!searchQuery && (
+                      <Link href="/search" style={{ textDecoration: 'none' }}>
+                        <button type="button" style={{ marginTop: 4, padding: '10px 22px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>
+                          Find People
+                        </button>
+                      </Link>
+                    )}
+                  </div>
+                ) : filteredUsers.map((u: any) => (
                   <div key={u.id} onClick={() => openDM(u)}
                     style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', cursor: 'pointer', borderBottom: '0.5px solid rgba(255,255,255,0.03)', background: selectedChat?.otherUser?.id === u.id ? 'rgba(139,92,246,0.1)' : 'transparent', transition: 'background 0.2s' }}
                     onMouseEnter={(e) => { if (selectedChat?.otherUser?.id !== u.id) e.currentTarget.style.background = 'rgba(139,92,246,0.05)'; }}
@@ -1438,12 +1469,14 @@ export default function Messages() {
         {!selectedChat && (
           <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
             {[
-              { href: '/feed', icon: '🏠', label: 'Home' },
-              { href: '/stories', icon: '✨', label: 'Stories' },
-              { href: '/search', icon: '🔍', label: 'Search' },
-              { href: '/messages', icon: '💬', label: 'DMs', active: true },
+              { href: '/feed',          icon: '🏠', label: 'Home' },
+              { href: '/search',        icon: '🔍', label: 'Search' },
+              { href: '/stories',       icon: '✨', label: 'Stories' },
+              { href: '/messages',      icon: '💬', label: 'DMs', active: true },
+              { href: '/games',         icon: '🎮', label: 'Games' },
+              { href: '/music',         icon: '🎵', label: 'Music' },
               { href: '/notifications', icon: '🔔', label: 'Alerts' },
-              { href: '/profile', icon: '👤', label: 'Profile' },
+              { href: '/profile',       icon: '👤', label: 'Profile' },
             ].map(({ href, icon, label, active }) => (
               <Link key={href} href={href} style={{ textDecoration: 'none' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 12px', borderRadius: 14, background: active ? 'rgba(139,92,246,0.15)' : 'transparent', cursor: 'pointer' }}>
