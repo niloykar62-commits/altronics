@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 export default function Navbar() {
-  const router = useRouter();
+  const { push } = useRouter();
   const pathname = usePathname();
   const [unreadCount, setUnreadCount] = useState(0);
   const [profile, setProfile] = useState<any>(null);
@@ -48,21 +48,24 @@ export default function Navbar() {
       try { await updateDoc(doc(db, 'users', uid), { lastSeen: serverTimestamp() }); } catch (_) {}
     }
     await signOut(auth);
-    router.push('/login');
+    push('/login');
   };
 
   const initials = profile?.fullName?.[0]?.toUpperCase() || 'U';
   const isActiveVisible = profile?.activeStatus !== false;
 
   const navItems = [
-    { href: '/feed', icon: '🏠', label: 'Home' },
-    { href: '/stories', icon: '✨', label: 'Stories' },
-    { href: '/messages', icon: '💬', label: 'DMs' },
-    { href: '/games', icon: '🎮', label: 'Games' },
-    { href: '/music', icon: '🎵', label: 'Music' },
+    { href: '/feed',          icon: '🏠', label: 'Home' },
+    { href: '/search',        icon: '🔍', label: 'Search' },
+    { href: '/stories',       icon: '✨', label: 'Stories' },
+    { href: '/messages',      icon: '💬', label: 'DMs' },
+    { href: '/games',         icon: '🎮', label: 'Games' },
+    { href: '/music',         icon: '🎵', label: 'Music' },
     { href: '/notifications', icon: '🔔', label: 'Alerts', badge: unreadCount },
-    { href: '/profile', icon: null, label: 'Profile', isAvatar: true },
+    { href: '/profile',       icon: null,  label: 'Profile', isAvatar: true },
   ];
+
+  const isHidden = pathname === '/messages';
 
   return (
     <>
@@ -73,16 +76,18 @@ export default function Navbar() {
         backdropFilter: 'blur(20px)',
         borderBottom: '0.5px solid rgba(139,92,246,0.15)',
       }}>
-        <div style={{ maxWidth: 600, margin: '0 auto', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ maxWidth: 600, margin: '0 auto', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 22, fontWeight: 900, letterSpacing: -1, background: 'linear-gradient(135deg,#a78bfa,#60a5fa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
             ALTRONICS
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Avatar in header */}
             <div style={{ position: 'relative', width: 32, height: 32, borderRadius: '50%', overflow: 'hidden', border: '1.5px solid rgba(139,92,246,0.4)', flexShrink: 0 }}>
               {profile?.photoURL ? (
-                <img src={profile.photoURL} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profile.photoURL} alt="Your avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               ) : (
-                <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: 'white' }}>
+                <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white' }}>
                   {initials}
                 </div>
               )}
@@ -91,6 +96,7 @@ export default function Navbar() {
               )}
             </div>
             <button
+              type="button"
               onClick={handleLogout}
               style={{ padding: '6px 16px', borderRadius: 20, background: 'rgba(239,68,68,0.1)', border: '0.5px solid rgba(239,68,68,0.3)', color: '#f87171', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}
             >
@@ -100,25 +106,32 @@ export default function Navbar() {
         </div>
       </header>
 
-      {/* Bottom Navigation */}
+      {/* Bottom Navigation — hidden on /messages (that page has its own nav) */}
       <nav style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 50,
         background: 'rgba(10,10,15,0.95)',
         backdropFilter: 'blur(20px)',
         borderTop: '0.5px solid rgba(139,92,246,0.15)',
-        padding: '8px 0 16px',
-        display: pathname === '/messages' ? 'none' : 'block',
+        padding: '8px 0 18px',
+        display: isHidden ? 'none' : 'block',
       }}>
         <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', justifyContent: 'space-around', alignItems: 'center' }}>
           {navItems.map(({ href, icon, label, badge, isAvatar }: any) => {
-            const isActive = pathname === href;
+            const isActive = pathname === href || (href !== '/feed' && pathname.startsWith(href));
             return (
               <Link key={href} href={href} style={{ textDecoration: 'none' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 8px', borderRadius: 14, background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent', transition: 'all 0.2s', position: 'relative', cursor: 'pointer' }}>
+                <div style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                  padding: '6px 10px', borderRadius: 14,
+                  background: isActive ? 'rgba(139,92,246,0.15)' : 'transparent',
+                  transition: 'background 0.2s',
+                  position: 'relative', cursor: 'pointer',
+                }}>
                   {isAvatar ? (
                     <div style={{ position: 'relative', width: 24, height: 24, borderRadius: '50%', overflow: 'hidden', border: isActive ? '1.5px solid #a78bfa' : '1.5px solid rgba(139,92,246,0.3)' }}>
                       {profile?.photoURL ? (
-                        <img src={profile.photoURL} alt="me" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={profile.photoURL} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                       ) : (
                         <div style={{ width: '100%', height: '100%', background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, color: 'white' }}>
                           {initials}
@@ -129,15 +142,21 @@ export default function Navbar() {
                       )}
                     </div>
                   ) : (
-                    <span style={{ fontSize: 18 }}>{icon}</span>
+                    <span style={{ fontSize: 20 }}>{icon}</span>
                   )}
-                  <span style={{ fontSize: 8, fontWeight: 600, color: isActive ? '#a78bfa' : '#6b7280' }}>{label}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: isActive ? '#a78bfa' : '#6b7280' }}>{label}</span>
+
+                  {/* Notification badge */}
                   {badge && badge > 0 && (
                     <span style={{ position: 'absolute', top: 2, right: 4, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', color: 'white', fontSize: 9, fontWeight: 700, width: 15, height: 15, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {badge > 9 ? '9+' : badge}
                     </span>
                   )}
-                  {isActive && <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#a78bfa' }} />}
+
+                  {/* Active dot */}
+                  {isActive && (
+                    <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#a78bfa' }} />
+                  )}
                 </div>
               </Link>
             );
