@@ -398,10 +398,8 @@ export default function Search() {
                                 </span>
                               </div>
                               <p style={{ fontSize: 13, color: '#d1d5db', lineHeight: 1.6, marginBottom: 8 }}>{post.content}</p>
-                              {post.imageUrl && (
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={post.imageUrl} alt="Post" style={{ width: '100%', borderRadius: 12, maxHeight: 200, objectFit: 'cover' as const, marginBottom: 8 }} />
-                              )}
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              {post.imageUrl && <img src={post.imageUrl} alt="Post" style={{ width: '100%', borderRadius: 12, maxHeight: 200, objectFit: 'cover' as const, marginBottom: 8 }} />}
                               <div style={{ display: 'flex', gap: 16 }}>
                                 <span style={{ fontSize: 12, color: '#f472b6' }}>❤️ {post.likes?.length || 0}</span>
                                 <span style={{ fontSize: 12, color: '#60a5fa' }}>💬 {post.comments?.length || 0}</span>
