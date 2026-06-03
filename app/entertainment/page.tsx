@@ -765,8 +765,21 @@ function WatchPlayer({ room, user, isHost }: { room: WatchRoom; user: any; isHos
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#000' }}
             onPlay={isHost ? syncPlay : undefined}
             onPause={isHost ? syncPause : undefined}
-            onSeeked={isHost ? syncPlay : undefined}>
+            onSeeked={isHost ? syncPlay : undefined}
+            onError={(e) => {
+              const v = e.currentTarget;
+              // Show inline error overlay
+              const parent = v.parentElement;
+              if (parent && !parent.querySelector('#drive-err')) {
+                const div = document.createElement('div');
+                div.id = 'drive-err';
+                div.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(10,10,15,0.95);color:#f3f4f6;font-family:Inter,sans-serif;padding:24px;text-align:center;gap:10px;';
+                div.innerHTML = '<span style="font-size:36px">⚠️</span><p style="font-weight:700;font-size:14px;margin:0">Google Drive blocked the video</p><p style="font-size:12px;color:#9ca3af;margin:0;line-height:1.6">Make sure the file is shared as<br/><strong style="color:#a78bfa">Anyone with the link → Viewer</strong><br/>in Google Drive settings</p>';
+                parent.appendChild(div);
+              }
+            }}>
             <source src={room.directUrl} type="video/mp4" />
+            <source src={room.directUrl} type="video/webm" />
             Your browser does not support this video.
           </video>
         )}
@@ -839,6 +852,20 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
     setLoadingUrl(false);
   };
 
+  // Test if the drive proxy is reachable and returning video
+  const testDriveProxy = async (fileId: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/drive-proxy?id=${fileId}`, { method: 'GET', headers: { Range: 'bytes=0-1024' } });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        return json?.error || `Server error ${res.status}`;
+      }
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('text/html') || ct.includes('application/json')) return 'Google returned a webpage instead of video. Check sharing settings.';
+      return null; // null = success
+    } catch (e: any) { return e.message; }
+  };
+
   const sendChat = async () => {
     if (!chatInput.trim() || !user || !userProfile) return;
     const text = chatInput.trim();
@@ -908,7 +935,21 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
                 </button>
               </div>
               {urlError && <p style={{ color: '#f87171', fontSize: 12, marginTop: 8 }}>⚠️ {urlError}</p>}
-              <p style={{ color: '#4b5563', fontSize: 11, marginTop: 8 }}>Supports YouTube · Vimeo · Dailymotion · Twitch · Direct .mp4 / .webm / .m3u8 links</p>
+              <p style={{ color: '#4b5563', fontSize: 11, marginTop: 8 }}>Supports YouTube · Vimeo · Dailymotion · Twitch · Direct .mp4/.webm/.m3u8 · Google Drive</p>
+              {/* Google Drive sharing reminder */}
+              {urlInput.toLowerCase().includes('drive.google.com') && (
+                <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(139,92,246,0.06)', border: '0.5px solid rgba(139,92,246,0.2)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: 14, flexShrink: 0 }}>ℹ️</span>
+                  <div>
+                    <p style={{ color: '#a78bfa', fontSize: 11, fontWeight: 700, margin: '0 0 2px' }}>Google Drive checklist</p>
+                    <p style={{ color: '#6b7280', fontSize: 11, margin: 0, lineHeight: 1.6 }}>
+                      1. Open the file in Drive<br/>
+                      2. Click Share → <strong style={{ color: '#d1d5db' }}>Anyone with the link</strong> → Viewer<br/>
+                      3. Copy the link and paste here
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
