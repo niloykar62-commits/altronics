@@ -118,15 +118,18 @@ async function detectVideoSource(url: string): Promise<VideoSource | null> {
   //   https://drive.google.com/uc?id=FILE_ID
   //   https://drive.google.com/uc?export=download&id=FILE_ID
   if (u.includes('drive.google.com')) {
-    // Try /file/d/ID/ format first
+    // Parse the file ID from any Drive URL format:
+    //   drive.google.com/file/d/FILE_ID/view
+    //   drive.google.com/open?id=FILE_ID
+    //   drive.google.com/uc?id=FILE_ID
     const fileMatch = u.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-    // Try ?id=ID or &id=ID format
-    const idMatch = u.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-    const driveId = fileMatch?.[1] || idMatch?.[1];
+    const idMatch   = u.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    const driveId   = fileMatch?.[1] || idMatch?.[1];
     if (driveId) {
-      // /preview is the correct embeddable URL for Google Drive videos
-      const streamUrl = `https://drive.google.com/file/d/${driveId}/preview`;
-      return { type: 'gdrive', url: streamUrl, fileId: driveId, title: 'Google Drive Video' };
+      // Route through our Next.js proxy to bypass Google's X-Frame-Options
+      // and CORS restrictions. The proxy fetches the video server-side.
+      const proxyUrl = `/api/drive-proxy?id=${driveId}`;
+      return { type: 'gdrive', url: proxyUrl, fileId: driveId, title: 'Google Drive Video' };
     }
   }
   return null;
@@ -712,7 +715,7 @@ function WatchPlayer({ room, user, isHost }: { room: WatchRoom; user: any; isHos
     await updateDoc(doc(db, 'watchRooms', room.id), { isPlaying: false, seekTo: cur, updatedAt: serverTimestamp() });
   };
 
-  if (!room.videoId && !room.directUrl && !room.videoChannel) return null;
+  if (!room.videoId && !room.directUrl && !room.videoChannel && vType !== 'gdrive') return null;
 
   const platformLabel = { youtube: 'YouTube', vimeo: 'Vimeo', dailymotion: 'Dailymotion', twitch: 'Twitch', direct: 'Direct', gdrive: 'Google Drive' }[vType] || 'Video';
   const platformColor = { youtube: '#f87171', vimeo: '#60a5fa', dailymotion: '#fbbf24', twitch: '#a78bfa', direct: '#34d399', gdrive: '#4ade80' }[vType] || '#a78bfa';
@@ -756,16 +759,16 @@ function WatchPlayer({ room, user, isHost }: { room: WatchRoom; user: any; isHos
           </video>
         )}
 
-        {/* Google Drive */}
+        {/* Google Drive — streamed via /api/drive-proxy to bypass CORS/X-Frame-Options */}
         {vType === 'gdrive' && room.directUrl && (
-          <iframe
-            src={room.directUrl}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
-            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-            allowFullScreen
-            sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-            title="Google Drive Video"
-          />
+          <video ref={videoRef} controls={isHost}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', background: '#000' }}
+            onPlay={isHost ? syncPlay : undefined}
+            onPause={isHost ? syncPause : undefined}
+            onSeeked={isHost ? syncPlay : undefined}>
+            <source src={room.directUrl} type="video/mp4" />
+            Your browser does not support this video.
+          </video>
         )}
       </div>
 
