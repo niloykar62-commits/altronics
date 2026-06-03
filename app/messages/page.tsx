@@ -1473,8 +1473,7 @@ export default function Messages() {
               { href: '/search',        icon: '🔍', label: 'Search' },
               { href: '/stories',       icon: '✨', label: 'Stories' },
               { href: '/messages',      icon: '💬', label: 'DMs', active: true },
-              { href: '/games',         icon: '🎮', label: 'Games' },
-              { href: '/music',         icon: '🎵', label: 'Music' },
+              { href: '/entertainment', icon: '🎉', label: 'Fun' },
               { href: '/notifications', icon: '🔔', label: 'Alerts' },
               { href: '/profile',       icon: '👤', label: 'Profile' },
             ].map(({ href, icon, label, active }) => (
