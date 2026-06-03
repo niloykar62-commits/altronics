@@ -126,10 +126,10 @@ async function detectVideoSource(url: string): Promise<VideoSource | null> {
     const idMatch   = u.match(/[?&]id=([a-zA-Z0-9_-]+)/);
     const driveId   = fileMatch?.[1] || idMatch?.[1];
     if (driveId) {
-      // Route through our Next.js proxy to bypass Google's X-Frame-Options
-      // and CORS restrictions. The proxy fetches the video server-side.
-      const proxyUrl = `/api/drive-proxy?id=${driveId}`;
-      return { type: 'gdrive', url: proxyUrl, fileId: driveId, title: 'Google Drive Video' };
+      // export=view works directly in <video> src for public files — no proxy needed
+      // export=download gets 403 server-side; export=view streams directly in browser
+      const streamUrl = `https://drive.google.com/uc?export=view&id=${driveId}`;
+      return { type: 'gdrive', url: streamUrl, fileId: driveId, title: 'Google Drive Video' };
     }
   }
   return null;

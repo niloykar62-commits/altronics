@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
               "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com https://apis.google.com https://cdn.jsdelivr.net",
               "frame-src 'self' https://www.youtube.com https://player.vimeo.com https://www.dailymotion.com https://player.twitch.tv",
               "img-src 'self' data: blob: https: http:",
-              "media-src 'self' blob: https:",
+              "media-src 'self' blob: https: https://drive.google.com https://*.googleusercontent.com",
               // Added /api/drive-proxy so the <video> src is allowed
               "connect-src 'self' https://*.googleapis.com https://*.firebase.io wss://*.firebaseio.com https://api.cloudinary.com https://noembed.com https://vimeo.com https://api.dailymotion.com https://static-cdn.jtvnw.net https://drive.google.com",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
