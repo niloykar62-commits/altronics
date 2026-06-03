@@ -110,20 +110,24 @@ async function detectVideoSource(url: string): Promise<VideoSource | null> {
     const filename = u.split('/').pop()?.split('?')[0] || 'Video';
     return { type: 'direct', url: u, title: decodeURIComponent(filename) };
   }
-  // Google Drive — convert share/view links to streamable URL
-  // Handles:
+  // Google Drive — convert any share/view/open/uc link to embeddable preview URL
+  // Handles all formats:
   //   https://drive.google.com/file/d/FILE_ID/view
   //   https://drive.google.com/file/d/FILE_ID/view?usp=sharing
   //   https://drive.google.com/open?id=FILE_ID
   //   https://drive.google.com/uc?id=FILE_ID
   //   https://drive.google.com/uc?export=download&id=FILE_ID
-  const driveFileMatch = u.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
-  const driveOpenMatch = u.match(/drive\.google\.com\/(?:open|uc)\?.*[?&]id=([a-zA-Z0-9_-]+)/);
-  const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1];
-  if (driveId) {
-    // Use the streaming-friendly preview URL (works without login for public files)
-    const streamUrl = `https://drive.google.com/uc?export=preview&id=${driveId}`;
-    return { type: 'gdrive', url: streamUrl, fileId: driveId, title: 'Google Drive Video' };
+  if (u.includes('drive.google.com')) {
+    // Try /file/d/ID/ format first
+    const fileMatch = u.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    // Try ?id=ID or &id=ID format
+    const idMatch = u.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    const driveId = fileMatch?.[1] || idMatch?.[1];
+    if (driveId) {
+      // /preview is the correct embeddable URL for Google Drive videos
+      const streamUrl = `https://drive.google.com/file/d/${driveId}/preview`;
+      return { type: 'gdrive', url: streamUrl, fileId: driveId, title: 'Google Drive Video' };
+    }
   }
   return null;
 }
@@ -757,8 +761,9 @@ function WatchPlayer({ room, user, isHost }: { room: WatchRoom; user: any; isHos
           <iframe
             src={room.directUrl}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
-            allow="autoplay; fullscreen"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             allowFullScreen
+            sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
             title="Google Drive Video"
           />
         )}
