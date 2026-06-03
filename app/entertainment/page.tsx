@@ -68,6 +68,7 @@ type VideoSource =
   | { type: 'dailymotion'; videoId: string;  title?: string; thumbnail?: string }
   | { type: 'twitch';      channel: string;  title?: string; thumbnail?: string }
   | { type: 'direct';      url: string;      title?: string; thumbnail?: string }
+  | { type: 'gdrive';      url: string;      fileId: string; title?: string; thumbnail?: string }
   | null;
 
 async function detectVideoSource(url: string): Promise<VideoSource | null> {
@@ -108,6 +109,21 @@ async function detectVideoSource(url: string): Promise<VideoSource | null> {
   if (/\.(mp4|webm|m3u8|mov|ogg)(\?.*)?$/i.test(u) || u.includes('blob:')) {
     const filename = u.split('/').pop()?.split('?')[0] || 'Video';
     return { type: 'direct', url: u, title: decodeURIComponent(filename) };
+  }
+  // Google Drive — convert share/view links to streamable URL
+  // Handles:
+  //   https://drive.google.com/file/d/FILE_ID/view
+  //   https://drive.google.com/file/d/FILE_ID/view?usp=sharing
+  //   https://drive.google.com/open?id=FILE_ID
+  //   https://drive.google.com/uc?id=FILE_ID
+  //   https://drive.google.com/uc?export=download&id=FILE_ID
+  const driveFileMatch = u.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+  const driveOpenMatch = u.match(/drive\.google\.com\/(?:open|uc)\?.*[?&]id=([a-zA-Z0-9_-]+)/);
+  const driveId = driveFileMatch?.[1] || driveOpenMatch?.[1];
+  if (driveId) {
+    // Use the streaming-friendly preview URL (works without login for public files)
+    const streamUrl = `https://drive.google.com/uc?export=preview&id=${driveId}`;
+    return { type: 'gdrive', url: streamUrl, fileId: driveId, title: 'Google Drive Video' };
   }
   return null;
 }
@@ -579,7 +595,7 @@ interface WatchRoom {
   videoId: string | null;       // youtube video id
   videoTitle: string | null;
   videoThumb: string | null;
-  videoType: 'youtube' | 'vimeo' | 'dailymotion' | 'twitch' | 'direct' | null;
+  videoType: 'youtube' | 'vimeo' | 'dailymotion' | 'twitch' | 'direct' | 'gdrive' | null;
   videoChannel: string | null;  // twitch channel
   directUrl: string | null;     // direct mp4/webm/m3u8 url
   isPlaying: boolean;
@@ -694,8 +710,8 @@ function WatchPlayer({ room, user, isHost }: { room: WatchRoom; user: any; isHos
 
   if (!room.videoId && !room.directUrl && !room.videoChannel) return null;
 
-  const platformLabel = { youtube: 'YouTube', vimeo: 'Vimeo', dailymotion: 'Dailymotion', twitch: 'Twitch', direct: 'Direct' }[vType] || 'Video';
-  const platformColor = { youtube: '#f87171', vimeo: '#60a5fa', dailymotion: '#fbbf24', twitch: '#a78bfa', direct: '#34d399' }[vType] || '#a78bfa';
+  const platformLabel = { youtube: 'YouTube', vimeo: 'Vimeo', dailymotion: 'Dailymotion', twitch: 'Twitch', direct: 'Direct', gdrive: 'Google Drive' }[vType] || 'Video';
+  const platformColor = { youtube: '#f87171', vimeo: '#60a5fa', dailymotion: '#fbbf24', twitch: '#a78bfa', direct: '#34d399', gdrive: '#4ade80' }[vType] || '#a78bfa';
 
   return (
     <div style={{ ...S.card, overflow: 'hidden', marginBottom: 16 }}>
@@ -734,6 +750,17 @@ function WatchPlayer({ room, user, isHost }: { room: WatchRoom; user: any; isHos
             <source src={room.directUrl} />
             Your browser does not support this video format.
           </video>
+        )}
+
+        {/* Google Drive */}
+        {vType === 'gdrive' && room.directUrl && (
+          <iframe
+            src={room.directUrl}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none' }}
+            allow="autoplay; fullscreen"
+            allowFullScreen
+            title="Google Drive Video"
+          />
         )}
       </div>
 
@@ -780,7 +807,7 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
     setLoadingUrl(true); setUrlError('');
     try {
       const source = await detectVideoSource(raw);
-      if (!source) { setUrlError('Unsupported URL. Try YouTube, Vimeo, Dailymotion, Twitch, or a direct .mp4/.webm/.m3u8 link.'); setLoadingUrl(false); return; }
+      if (!source) { setUrlError('Unsupported URL. Try YouTube, Vimeo, Dailymotion, Twitch, Google Drive, or a direct .mp4/.webm/.m3u8 link.'); setLoadingUrl(false); return; }
       const update: any = {
         videoType: source.type,
         videoTitle: source.title || raw,
@@ -797,6 +824,7 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
       if (source.type === 'dailymotion') update.videoId = source.videoId;
       if (source.type === 'twitch')      update.videoChannel = source.channel;
       if (source.type === 'direct')      update.directUrl = source.url;
+      if (source.type === 'gdrive')      update.directUrl = source.url;
       await updateDoc(doc(db, 'watchRooms', room.id), update);
       setUrlInput('');
     } catch (err: any) { setUrlError('Failed to load: ' + err.message); }
@@ -863,7 +891,7 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
                   value={urlInput}
                   onChange={(e) => { setUrlInput(e.target.value); setUrlError(''); }}
                   onKeyDown={(e) => e.key === 'Enter' && loadVideo()}
-                  placeholder="YouTube, Vimeo, Dailymotion, Twitch, or .mp4/.webm/.m3u8 URL…"
+                  placeholder="YouTube, Vimeo, Dailymotion, Twitch, Google Drive, or .mp4/.webm/.m3u8 URL…"
                   style={{ ...S.input, flex: 1, fontSize: 13 }}
                 />
                 <button type="button" onClick={loadVideo} disabled={!urlInput.trim() || loadingUrl}
@@ -1361,7 +1389,7 @@ export default function EntertainmentPage() {
 
                 <div style={{ ...S.card, padding: '18px 20px', marginBottom: 20 }}>
                   <p style={{ color: '#9ca3af', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 14 }}>How it works</p>
-                  {[['🎬','Create a room and invite friends'],['▶️','YouTube, Vimeo, Dailymotion & Twitch streams'],['📁','Or paste any direct .mp4 / .webm / .m3u8 link'],['📺','Everyone watches at the exact same time'],['⏯️','Host controls play, pause and seeking'],['💬','Chat together while watching']].map(([icon, text]) => (
+                  {[['🎬','Create a room and invite friends'],['▶️','YouTube, Vimeo, Dailymotion & Twitch streams'],['📁','Direct .mp4/.webm/.m3u8 or Google Drive links'],['📺','Everyone watches at the exact same time'],['⏯️','Host controls play, pause and seeking'],['💬','Chat together while watching']].map(([icon, text]) => (
                     <div key={String(text)} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
                       <span style={{ fontSize: 18, width: 28, textAlign: 'center' }}>{icon}</span>
                       <span style={{ color: '#9ca3af', fontSize: 13 }}>{text}</span>
