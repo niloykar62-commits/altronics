@@ -6,9 +6,19 @@ import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, query, where, orderBy,
-  getDocs, updateDoc, doc,
+  onSnapshot, updateDoc, doc, writeBatch,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
+
+function timeAgo(ts: any): string {
+  if (!ts?.toDate) return 'Just now';
+  const diff = Date.now() - ts.toDate().getTime();
+  if (diff < 60000) return 'Just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+  return ts.toDate().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 export default function Notifications() {
   const [user, setUser] = useState<any>(null);
@@ -20,29 +30,33 @@ export default function Notifications() {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) { router.push('/login'); return; }
       setUser(firebaseUser);
-      await loadNotifications(firebaseUser.uid);
       setPageLoading(false);
     });
     return () => unsubscribe();
   }, []);
 
-  const loadNotifications = async (uid: string) => {
-    try {
-      const q = query(
-        collection(db, 'notifications'),
-        where('toUserId', '==', uid),
-        orderBy('createdAt', 'desc')
-      );
-      const snapshot = await getDocs(q);
+  // Live notifications listener — updates in real-time
+  useEffect(() => {
+    if (!user) return;
+    const q = query(
+      collection(db, 'notifications'),
+      where('toUserId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+    const unsub = onSnapshot(q, (snapshot) => {
       setNotifications(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-    } catch (err) { console.error(err); }
-  };
+    }, (err) => { console.error(err); });
+    return () => unsub();
+  }, [user]);
 
   const markAllRead = async () => {
     try {
       const unread = notifications.filter((n) => !n.read);
-      await Promise.all(unread.map((n) => updateDoc(doc(db, 'notifications', n.id), { read: true })));
-      await loadNotifications(user.uid);
+      if (unread.length === 0) return;
+      const batch = writeBatch(db);
+      unread.forEach((n) => batch.update(doc(db, 'notifications', n.id), { read: true }));
+      await batch.commit();
+      // onSnapshot will automatically update the local state
     } catch (err) { console.error(err); }
   };
 
@@ -209,7 +223,7 @@ export default function Notifications() {
                     {getMessage(n)}
                   </p>
                   <p style={{ fontSize: 11, color: '#4b5563', margin: '4px 0 0', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    {n.createdAt?.toDate ? new Date(n.createdAt.toDate()).toLocaleString() : 'Just now'}
+                    {timeAgo(n.createdAt)}
                     <span style={{ fontSize: 10, color: '#6b7280', background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: '1px 6px' }}>
                       {n.type === 'message' || n.type === 'mention' || n.type === 'group_invite' ? '→ Open chat' :
                        n.type === 'follow' ? '→ View profile' :

@@ -19,7 +19,7 @@ import {
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import {
   collection, query, where, orderBy, getDocs,
-  doc, getDoc, updateDoc, deleteDoc,
+  doc, getDoc, updateDoc, deleteDoc, writeBatch, arrayRemove,
 } from 'firebase/firestore';
 import Image from 'next/image';
 import Navbar from '@/components/Navbar';
@@ -74,6 +74,8 @@ export default function Profile() {
   const [newBio, setNewBio] = useState('');
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'posts' | 'liked'>('posts');
+  const [likedPosts, setLikedPosts] = useState<any[]>([]);
+  const [likedLoading, setLikedLoading] = useState(false);
 
   // ── Profile pic ───────────────────────────────────────────────────────────
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -162,6 +164,17 @@ export default function Profile() {
       const snap = await getDocs(q);
       setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) { console.error(err); }
+  };
+
+  const loadLikedPosts = async (uid: string) => {
+    if (likedPosts.length > 0) return; // already loaded
+    setLikedLoading(true);
+    try {
+      const q = query(collection(db, 'posts'), where('likes', 'array-contains', uid), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      setLikedPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (err) { console.error(err); }
+    setLikedLoading(false);
   };
 
   const saveProfile = async () => {
@@ -302,19 +315,106 @@ export default function Profile() {
     if (deleteConfirmText !== 'DELETE') { setDeleteError('Type DELETE to confirm.'); return; }
     setDeleteLoading(true); setDeleteError('');
     try {
+      // ── 1. Re-authenticate first (required by Firebase for sensitive ops) ──
       const hasEmail = user?.providerData?.some((p: any) => p.providerId === 'password');
       if (hasEmail) {
         if (!deletePassword) { setDeleteError('Enter your password.'); setDeleteLoading(false); return; }
         const cred = EmailAuthProvider.credential(user.email, deletePassword);
         await reauthenticateWithCredential(auth.currentUser!, cred);
       }
-      await deleteDoc(doc(db, 'users', user.uid));
+
+      const uid = user.uid;
+
+      // Helper: delete all docs from a query in batches of 500
+      const deleteQuery = async (q: any) => {
+        const snap = await getDocs(q);
+        if (snap.empty) return;
+        const batch = writeBatch(db);
+        snap.docs.forEach((d: any) => batch.delete(d.ref));
+        await batch.commit();
+      };
+
+      // ── 2. Delete user's own posts ─────────────────────────────────────────
+      await deleteQuery(query(collection(db, 'posts'), where('userId', '==', uid)));
+
+      // ── 3. Delete user's own stories ──────────────────────────────────────
+      await deleteQuery(query(collection(db, 'stories'), where('userId', '==', uid)));
+
+      // ── 4. Delete notifications addressed to this user ────────────────────
+      await deleteQuery(query(collection(db, 'notifications'), where('toUserId', '==', uid)));
+
+      // ── 5. Delete notifications sent by this user ─────────────────────────
+      await deleteQuery(query(collection(db, 'notifications'), where('fromUserId', '==', uid)));
+
+      // ── 6. Remove from followers lists of everyone this user follows ───────
+      const followingIds: string[] = profile?.following || [];
+      if (followingIds.length > 0) {
+        // Process in chunks of 20 to avoid too many parallel writes
+        for (let i = 0; i < followingIds.length; i += 20) {
+          await Promise.all(
+            followingIds.slice(i, i + 20).map((fid: string) =>
+              updateDoc(doc(db, 'users', fid), { followers: arrayRemove(uid) }).catch(() => {})
+            )
+          );
+        }
+      }
+
+      // ── 7. Remove from following lists of everyone who follows this user ───
+      const followerIds: string[] = profile?.followers || [];
+      if (followerIds.length > 0) {
+        for (let i = 0; i < followerIds.length; i += 20) {
+          await Promise.all(
+            followerIds.slice(i, i + 20).map((fid: string) =>
+              updateDoc(doc(db, 'users', fid), { following: arrayRemove(uid) }).catch(() => {})
+            )
+          );
+        }
+      }
+
+      // ── 8. Remove user from any circles they're a member of ────────────────
+      const circlesSnap = await getDocs(
+        query(collection(db, 'circles'), where('memberIds', 'array-contains', uid))
+      );
+      if (!circlesSnap.empty) {
+        await Promise.all(
+          circlesSnap.docs.map(async (circleDoc: any) => {
+            const data = circleDoc.data();
+            // If this user is the only member, delete the circle entirely
+            const remainingMembers = (data.memberIds || []).filter((id: string) => id !== uid);
+            if (remainingMembers.length === 0) {
+              return deleteDoc(circleDoc.ref);
+            }
+            // Otherwise remove them from the circle
+            const newMembers = (data.members || []).filter((m: any) => m.uid !== uid);
+            // If this user was the host, promote the next member
+            const updates: any = {
+              memberIds: arrayRemove(uid),
+              members: newMembers,
+            };
+            if (data.hostId === uid && remainingMembers.length > 0) {
+              updates.hostId = remainingMembers[0];
+              updates.hostName = newMembers[0]?.name || 'Member';
+            }
+            return updateDoc(circleDoc.ref, updates).catch(() => {});
+          })
+        );
+      }
+
+      // ── 9. Delete presence doc ─────────────────────────────────────────────
+      await deleteDoc(doc(db, 'presence', uid)).catch(() => {});
+
+      // ── 10. Delete the Firestore user document ─────────────────────────────
+      await deleteDoc(doc(db, 'users', uid));
+
+      // ── 11. Delete the Firebase Auth account ──────────────────────────────
       await deleteUser(auth.currentUser!);
+
       push('/login');
     } catch (err: any) {
       if (err.code === 'auth/wrong-password') setDeleteError('Wrong password.');
       else if (err.code === 'auth/requires-recent-login') setDeleteError('Please log out and log back in, then try again.');
-      else setDeleteError(err.message);
+      else setDeleteError('Something went wrong. Please try again.');
+      console.error('[DeleteAccount]', err);
     }
     setDeleteLoading(false);
   };
@@ -650,46 +750,94 @@ export default function Profile() {
             {/* ── Tabs ── */}
             <div style={{ display: 'flex', borderBottom: '0.5px solid rgba(255,255,255,0.06)', marginTop: 4 }}>
               {(['posts', 'liked'] as const).map(tab => (
-                <button type="button" key={tab} onClick={() => setActiveTab(tab)}
+                <button type="button" key={tab} onClick={() => {
+                  setActiveTab(tab);
+                  if (tab === 'liked' && user) loadLikedPosts(user.uid);
+                }}
                   style={{ flex: 1, padding: '12px 0', background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid var(--accent-purple)' : '2px solid transparent', color: activeTab === tab ? 'var(--accent-purple-light)' : 'var(--text-muted)', fontSize: 13, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize', transition: 'all 0.2s', fontFamily: 'Inter,sans-serif' }}>
-                  {tab === 'posts' ? '⚡ Posts' : '❤️ Liked'}
+                  {tab === 'posts' ? `⚡ Posts` : '❤️ Liked'}
                 </button>
               ))}
             </div>
           </div>
         </div>
 
-        {/* ── Posts list ── */}
+        {/* ── Posts / Liked list ── */}
         <div style={{ maxWidth: 600, margin: '0 auto', padding: '0 16px' }}>
-          {posts.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px 20px' }}>
-              <p style={{ fontSize: 32, marginBottom: 12 }}>✨</p>
-              <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No posts yet. Share something!</p>
-            </div>
-          ) : posts.map(post => (
-            <div key={post.id} style={{ padding: '16px 0', borderBottom: '0.5px solid var(--border-subtle)' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', border: '1px solid var(--border)', flexShrink: 0 }}>
-                  {profile?.photoURL
-                    ? <Image src={profile.photoURL} alt="Profile" fill sizes="36px" style={{ objectFit: 'cover' }} />
-                    : <div style={{ width: '100%', height: '100%', background: 'var(--gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white' }}>{initials}</div>
-                  }
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{profile?.fullName}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{profile?.username}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>{post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : 'Just now'}</span>
+
+          {/* ── POSTS TAB ── */}
+          {activeTab === 'posts' && (
+            posts.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                <p style={{ fontSize: 32, marginBottom: 12 }}>✨</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No posts yet. Share something!</p>
+              </div>
+            ) : posts.map(post => (
+              <div key={post.id} style={{ padding: '16px 0', borderBottom: '0.5px solid var(--border-subtle)', cursor: 'pointer' }}
+                onClick={() => push(`/post/${post.id}`)}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', border: '1px solid var(--border)', flexShrink: 0 }}>
+                    {profile?.photoURL
+                      ? <Image src={profile.photoURL} alt="Profile" fill sizes="36px" style={{ objectFit: 'cover' }} />
+                      : <div style={{ width: '100%', height: '100%', background: 'var(--gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white' }}>{initials}</div>
+                    }
                   </div>
-                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{post.content}</p>
-                  <div style={{ display: 'flex', gap: 20 }}>
-                    <span style={{ fontSize: 12, color: '#f472b6' }}>❤️ {post.likes?.length || 0}</span>
-                    <span style={{ fontSize: 12, color: 'var(--accent-blue-light)' }}>💬 {post.comments?.length || 0}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{profile?.fullName}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{profile?.username}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>{post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : 'Just now'}</span>
+                    </div>
+                    {post.content && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{post.content}</p>}
+                    {post.imageUrl && <img src={post.imageUrl} alt="" style={{ width: '100%', borderRadius: 12, maxHeight: 200, objectFit: 'cover', marginBottom: 10, border: '0.5px solid var(--border-subtle)' }} />}
+                    <div style={{ display: 'flex', gap: 20 }}>
+                      <span style={{ fontSize: 12, color: '#f472b6' }}>❤️ {post.likes?.length || 0}</span>
+                      <span style={{ fontSize: 12, color: 'var(--accent-blue-light)' }}>💬 {post.comments?.length || 0}</span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
+
+          {/* ── LIKED TAB ── */}
+          {activeTab === 'liked' && (
+            likedLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 20px' }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(139,92,246,0.3)', borderTopColor: '#a78bfa', animation: 'spin 0.8s linear infinite' }} />
+              </div>
+            ) : likedPosts.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                <p style={{ fontSize: 32, marginBottom: 12 }}>🤍</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No liked posts yet.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6 }}>Posts you like will appear here.</p>
+              </div>
+            ) : likedPosts.map((post: any) => (
+              <div key={post.id} style={{ padding: '16px 0', borderBottom: '0.5px solid var(--border-subtle)', cursor: 'pointer' }}
+                onClick={() => push(`/post/${post.id}`)}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', background: 'var(--gradient)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white', flexShrink: 0 }}>
+                    {post.photoURL
+                      ? <img src={post.photoURL} alt={post.fullName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : post.fullName?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{post.fullName}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{post.username}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>{post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : 'Just now'}</span>
+                    </div>
+                    {post.content && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{post.content}</p>}
+                    {post.imageUrl && <img src={post.imageUrl} alt="" style={{ width: '100%', borderRadius: 12, maxHeight: 200, objectFit: 'cover', marginBottom: 10, border: '0.5px solid var(--border-subtle)' }} />}
+                    <div style={{ display: 'flex', gap: 20 }}>
+                      <span style={{ fontSize: 12, color: '#f472b6' }}>❤️ {post.likes?.length || 0}</span>
+                      <span style={{ fontSize: 12, color: 'var(--accent-blue-light)' }}>💬 {post.comments?.length || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
 

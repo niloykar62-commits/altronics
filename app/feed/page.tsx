@@ -12,6 +12,16 @@ const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
 const inputStyle = { width: '100%', padding: '12px 16px', background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)', borderRadius: 12, color: '#f3f4f6', fontSize: 14, fontFamily: 'Inter,sans-serif', outline: 'none' };
 
+function timeAgo(ts: any): string {
+  if (!ts?.toDate) return 'Just now';
+  const diff = Date.now() - ts.toDate().getTime();
+  if (diff < 60000) return 'Just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+  return ts.toDate().toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 export default function Feed() {
   const [posts, setPosts] = useState<any[]>([]);
   const [content, setContent] = useState('');
@@ -125,6 +135,7 @@ export default function Feed() {
         userId: user.uid,
         username: userProfile?.username || 'anonymous',
         fullName: userProfile?.fullName || 'User',
+        photoURL: userProfile?.photoURL || null,
         content: content.trim(),
         imageUrl: imageUrl ?? null,
         createdAt: serverTimestamp(),
@@ -164,11 +175,19 @@ export default function Feed() {
   const toggleLike = async (post: any) => {
     if (!user) return;
     const alreadyLiked = post.likes?.includes(user.uid);
+    // Optimistic update
+    setPosts(prev => prev.map(p => p.id === post.id
+      ? { ...p, likes: alreadyLiked ? p.likes.filter((id: string) => id !== user.uid) : [...p.likes, user.uid] }
+      : p
+    ));
     try {
       await updateDoc(doc(db, 'posts', post.id), { likes: alreadyLiked ? arrayRemove(user.uid) : arrayUnion(user.uid) });
-      if (!alreadyLiked) await sendNotification(post.userId, 'like');
-      await loadPosts(followingIds);
-    } catch (err) { console.error(err); }
+      if (!alreadyLiked) await sendNotification(post.userId, 'like', { postId: post.id });
+    } catch (err) {
+      // Revert on error
+      setPosts(prev => prev.map(p => p.id === post.id ? { ...p, likes: post.likes } : p));
+      console.error(err);
+    }
   };
 
   const toggleBookmark = async (postId: string) => {
@@ -298,8 +317,10 @@ export default function Feed() {
         {/* Create Post */}
         <div style={{ padding: '16px 20px', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
           <div style={{ display: 'flex', gap: 12 }}>
-            <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.4),rgba(59,130,246,0.4))', border: '1px solid rgba(139,92,246,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, color: '#a78bfa', flexShrink: 0 }}>
-              {userProfile?.fullName?.[0]?.toUpperCase() || 'U'}
+            <div style={{ width: 40, height: 40, borderRadius: '50%', overflow: 'hidden', background: 'linear-gradient(135deg,rgba(139,92,246,0.4),rgba(59,130,246,0.4))', border: '1px solid rgba(139,92,246,0.3)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, color: '#a78bfa' }}>
+              {userProfile?.photoURL
+                ? <img src={userProfile.photoURL} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : userProfile?.fullName?.[0]?.toUpperCase() || 'U'}
             </div>
             <div style={{ flex: 1 }}>
               <textarea
@@ -370,8 +391,10 @@ export default function Feed() {
               )}
 
               <div style={{ display: 'flex', gap: 12 }}>
-                <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', border: '1px solid rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, color: '#a78bfa', flexShrink: 0 }}>
-                  {post.fullName?.[0]?.toUpperCase() || 'U'}
+                <div style={{ width: 40, height: 40, borderRadius: '50%', overflow: 'hidden', background: 'linear-gradient(135deg,rgba(139,92,246,0.3),rgba(59,130,246,0.3))', border: '1px solid rgba(139,92,246,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 15, color: '#a78bfa', flexShrink: 0 }}>
+                  {post.photoURL
+                    ? <img src={post.photoURL} alt={post.fullName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : post.fullName?.[0]?.toUpperCase() || 'U'}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -380,7 +403,7 @@ export default function Feed() {
                       <span style={{ fontSize: 12, color: '#6b7280' }}>@{post.username}</span>
                       {post.edited && <span style={{ fontSize: 12, color: '#4b5563', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: 4 }}>edited</span>}
                       <span style={{ fontSize: 12, color: '#4b5563' }}>
-                        {post.createdAt?.toDate ? new Date(post.createdAt.toDate()).toLocaleDateString() : 'now'}
+                        {timeAgo(post.createdAt)}
                       </span>
                     </div>
                     {isOwner && editingPost !== post.id && (

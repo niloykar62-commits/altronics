@@ -3,7 +3,7 @@
 import { useRouter, usePathname } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, query, where, getDocs, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import Link from 'next/link';
 import { useEffect, useState, useRef } from 'react';
 import OmegaChat from '@/components/OmegaChat';
@@ -41,13 +41,26 @@ export default function Navbar() {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
         setUid(firebaseUser.uid);
-        await loadUnreadCount(firebaseUser.uid);
         await loadProfile(firebaseUser.uid);
         try { await updateDoc(doc(db, 'users', firebaseUser.uid), { lastSeen: serverTimestamp() }); } catch (_) {}
       }
     });
     return () => unsubscribe();
   }, []);
+
+  // Live unread count — updates instantly when notifications are created/read
+  useEffect(() => {
+    if (!uid) return;
+    const q = query(
+      collection(db, 'notifications'),
+      where('toUserId', '==', uid),
+      where('read', '==', false)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setUnreadCount(snap.size);
+    });
+    return () => unsub();
+  }, [uid]);
 
   const loadProfile = async (userId: string) => {
     try {

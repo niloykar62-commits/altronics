@@ -54,15 +54,40 @@ function CircleDetailContent() {
       if (!fu) { router.push('/login'); return; }
       setUser(fu);
       const pd = await getDoc(doc(db, 'users', fu.uid));
-      if (pd.exists()) setUserProfile({ id: pd.id, ...pd.data() });
-      const snap = await getDocs(collection(db, 'users'));
-      setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((u: any) => u.id !== fu.uid));
+      if (pd.exists()) {
+        setUserProfile({ id: pd.id, ...pd.data() });
+        // Only fetch social connections (followers + following) for the invite list
+        // instead of the entire users collection
+        const profileData = pd.data();
+        const socialIds: string[] = [
+          ...new Set([
+            ...(profileData.following || []),
+            ...(profileData.followers || []),
+          ])
+        ].filter((id: string) => id !== fu.uid);
+        if (socialIds.length > 0) {
+          // Firestore 'in' operator supports up to 30 items per query
+          const chunks: string[][] = [];
+          for (let i = 0; i < socialIds.length; i += 30) {
+            chunks.push(socialIds.slice(i, i + 30));
+          }
+          const results = await Promise.all(
+            chunks.map(chunk =>
+              getDocs(query(collection(db, 'users'), where('__name__', 'in', chunk)))
+            )
+          );
+          const users = results.flatMap(snap =>
+            snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
+          );
+          setAllUsers(users);
+        }
+      }
       setPageLoading(false);
     });
     return () => unsub();
   }, []);
 
-  // Live circle data
+  // Live circle data — verify membership before rendering anything
   useEffect(() => {
     if (!circleId) return;
     const unsub = onSnapshot(doc(db, 'circles', circleId), snap => {
@@ -72,22 +97,26 @@ function CircleDetailContent() {
     return () => unsub();
   }, [circleId]);
 
-  // Check membership + load posts
+  // Check membership client-side (Firestore rules must also enforce this server-side)
   useEffect(() => {
     if (!user || !circle) return;
     if (!circle.memberIds?.includes(user.uid)) { setNotMember(true); return; }
     setNotMember(false);
+    // Reset unread badge when member opens the circle
+    if (circle.newPostCount > 0) {
+      updateDoc(doc(db, 'circles', circleId), { newPostCount: 0 }).catch(() => {});
+    }
   }, [user, circle]);
 
-  // Live posts
+  // Live posts — only subscribe when confirmed member to avoid unnecessary reads
   useEffect(() => {
-    if (!circleId || !user) return;
+    if (!circleId || !user || notMember) return;
     const q = query(collection(db, 'circles', circleId, 'posts'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, snap => {
       setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
     return () => unsub();
-  }, [circleId, user]);
+  }, [circleId, user, notMember]);
 
   // Upload image to Cloudinary
   const uploadImage = async (file: File): Promise<string | null> => {
@@ -102,6 +131,8 @@ function CircleDetailContent() {
 
   const submitPost = async () => {
     if ((!postText.trim() && !postImage) || !user || !circle) return;
+    // Double-check membership before writing — defense-in-depth
+    if (!circle.memberIds?.includes(user.uid)) return;
     setPosting(true);
     try {
       let imageUrl: string | null = null;
@@ -177,7 +208,8 @@ function CircleDetailContent() {
   };
 
   const inviteUser = async (uid: string) => {
-    if (!circle || inviting) return;
+    // Only the circle host can invite new members
+    if (!circle || inviting || circle.hostId !== user?.uid) return;
     setInviting(uid);
     const u = allUsers.find((x: any) => x.id === uid);
     try {
@@ -262,7 +294,7 @@ function CircleDetailContent() {
                 </div>
               </button>
               <button onClick={() => setShowInvite(true)}
-                style={{ padding: '6px 14px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif', flexShrink: 0 }}>
+                style={{ padding: '6px 14px', borderRadius: 20, background: 'linear-gradient(135deg,#8b5cf6,#3b82f6)', border: 'none', color: 'white', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif', flexShrink: 0, display: isHost ? 'block' : 'none' }}>
                 + Invite
               </button>
             </div>

@@ -37,9 +37,33 @@ function CirclesContent() {
       if (!fu) { router.push('/login'); return; }
       setUser(fu);
       const pd = await getDoc(doc(db, 'users', fu.uid));
-      if (pd.exists()) setUserProfile({ id: pd.id, ...pd.data() });
-      const snap = await getDocs(collection(db, 'users'));
-      setAllUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((u: any) => u.id !== fu.uid));
+      if (pd.exists()) {
+        const profileData = pd.data();
+        setUserProfile({ id: pd.id, ...profileData });
+        // Only load social connections (followers + following) for invite list
+        // instead of the entire users collection
+        const socialIds: string[] = [
+          ...new Set([
+            ...(profileData.following || []),
+            ...(profileData.followers || []),
+          ])
+        ].filter((id: string) => id !== fu.uid);
+
+        if (socialIds.length > 0) {
+          const chunks: string[][] = [];
+          for (let i = 0; i < socialIds.length; i += 30) {
+            chunks.push(socialIds.slice(i, i + 30));
+          }
+          const results = await Promise.all(
+            chunks.map(chunk =>
+              getDocs(query(collection(db, 'users'), where('__name__', 'in', chunk)))
+            )
+          );
+          setAllUsers(results.flatMap(snap =>
+            snap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
+          ));
+        }
+      }
       setPageLoading(false);
     });
     return () => unsub();

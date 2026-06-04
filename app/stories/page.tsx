@@ -7,7 +7,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection, addDoc, getDocs, orderBy,
   query, serverTimestamp, doc, getDoc,
-  updateDoc, arrayUnion, arrayRemove,
+  updateDoc, arrayUnion, arrayRemove, deleteDoc,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
 
@@ -28,6 +28,13 @@ export default function Stories() {
   const [showReply, setShowReply] = useState(false);
   const [replies, setReplies] = useState<any[]>([]);
   const router = useRouter();
+
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (msg: string, type: 'success' | 'error' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -110,8 +117,8 @@ export default function Stories() {
         createdAt: serverTimestamp(), views: [], likes: [],
       });
       await loadStories();
-      alert('Story posted! ✨');
-    } catch (err: any) { alert('Failed: ' + err.message); }
+      showToast('Story posted! ✨');
+    } catch (err: any) { showToast('Failed: ' + err.message, 'error'); }
     setUploading(false);
   };
 
@@ -121,7 +128,16 @@ export default function Stories() {
     setProgress(0);
     setReplies([]);
     setShowReply(false);
-    await loadReplies(group.stories[0]?.id);
+    const firstStory = group.stories[0];
+    if (firstStory) {
+      await loadReplies(firstStory.id);
+      // Record view for the first story if not already viewed
+      if (user && !firstStory.views?.includes(user.uid) && firstStory.userId !== user.uid) {
+        updateDoc(doc(db, 'stories', firstStory.id), {
+          views: arrayUnion(user.uid),
+        }).catch(() => {});
+      }
+    }
   };
 
   const nextStory = async () => {
@@ -131,7 +147,16 @@ export default function Stories() {
       setProgress(0);
       setReplies([]);
       setShowReply(false);
-      await loadReplies(selectedGroup.stories[nextIdx]?.id);
+      const nextStory = selectedGroup.stories[nextIdx];
+      if (nextStory) {
+        await loadReplies(nextStory.id);
+        // Record view
+        if (user && !nextStory.views?.includes(user.uid) && nextStory.userId !== user.uid) {
+          updateDoc(doc(db, 'stories', nextStory.id), {
+            views: arrayUnion(user.uid),
+          }).catch(() => {});
+        }
+      }
     } else {
       setSelectedGroup(null);
     }
@@ -175,6 +200,14 @@ export default function Stories() {
     } catch (err) { console.error(err); }
   };
 
+  const deleteStory = async (storyId: string) => {
+    try {
+      await deleteDoc(doc(db, 'stories', storyId));
+      await loadStories();
+      showToast('Story deleted');
+    } catch (err: any) { showToast('Failed to delete story', 'error'); }
+  };
+
   const sendReply = async () => {
     if (!replyText.trim() || !user || !selectedGroup) return;
     const story = selectedGroup.stories[currentStoryIndex];
@@ -216,6 +249,24 @@ export default function Stories() {
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
       <Navbar />
+
+      {/* Toast notification */}
+      {toast && (
+        <div style={{
+          position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 9999, padding: '12px 20px', borderRadius: 16,
+          background: toast.type === 'success' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+          border: `0.5px solid ${toast.type === 'success' ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.4)'}`,
+          color: toast.type === 'success' ? '#4ade80' : '#f87171',
+          fontSize: 13, fontWeight: 600, backdropFilter: 'blur(12px)',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+          animation: 'fadeInDown 0.3s ease',
+          whiteSpace: 'nowrap',
+        }}>
+          {toast.type === 'success' ? '✅' : '⚠️'} {toast.msg}
+        </div>
+      )}
+      <style>{`@keyframes fadeInDown{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
 
       {/* Story Viewer Modal */}
       {selectedGroup && (
@@ -278,6 +329,15 @@ export default function Stories() {
               {likeCount > 0 && (
                 <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', margin: '0 0 10px', textAlign: 'center' }}>
                   ❤️ {likeCount} {likeCount === 1 ? 'like' : 'likes'}
+                  {currentStory?.userId === user?.uid && (currentStory?.views?.length > 0) && (
+                    <span style={{ marginLeft: 12 }}>👁 {currentStory.views.length} {currentStory.views.length === 1 ? 'view' : 'views'}</span>
+                  )}
+                </p>
+              )}
+              {/* View count (no likes yet) — only visible to story owner */}
+              {likeCount === 0 && currentStory?.userId === user?.uid && (currentStory?.views?.length > 0) && (
+                <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', margin: '0 0 10px', textAlign: 'center' }}>
+                  👁 {currentStory.views.length} {currentStory.views.length === 1 ? 'view' : 'views'}
                 </p>
               )}
 

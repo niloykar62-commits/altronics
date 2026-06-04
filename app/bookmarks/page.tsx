@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
-  collection, getDocs, doc, getDoc, updateDoc, arrayRemove,
+  collection, getDocs, doc, getDoc, updateDoc, arrayRemove, query, where,
 } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
 
@@ -31,11 +31,24 @@ export default function Bookmarks() {
   const loadBookmarks = async (bookmarkIds: string[]) => {
     if (bookmarkIds.length === 0) { setBookmarkedPosts([]); return; }
     try {
-      const snapshot = await getDocs(collection(db, 'posts'));
-      const posts = snapshot.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((p: any) => bookmarkIds.includes(p.id));
-      setBookmarkedPosts(posts);
+      // Fetch only the bookmarked posts by ID — no full collection scan
+      const chunks: string[][] = [];
+      for (let i = 0; i < bookmarkIds.length; i += 30) {
+        chunks.push(bookmarkIds.slice(i, i + 30));
+      }
+      const results = await Promise.all(
+        chunks.map(chunk =>
+          getDocs(query(collection(db, 'posts'), where('__name__', 'in', chunk)))
+        )
+      );
+      const posts = results.flatMap(snap =>
+        snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+      );
+      // Preserve the original bookmark order
+      const ordered = bookmarkIds
+        .map(id => posts.find((p: any) => p.id === id))
+        .filter(Boolean);
+      setBookmarkedPosts(ordered);
     } catch (err) { console.error(err); }
   };
 
