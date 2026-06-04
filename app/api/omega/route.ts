@@ -1,21 +1,20 @@
 // app/api/omega/route.ts
-// Primary: Groq (Llama 3 — fastest, free)
-// Fallback: Google Gemini (most generous free tier)
-
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
-// ─── Groq ─────────────────────────────────────────────────────────────────────
 async function callGroq(system: string, messages: any[]): Promise<string> {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) throw new Error('GROQ_API_KEY not set in environment variables');
+
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+      'Authorization': `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile', // best free Groq model
+      model: 'llama-3.3-70b-versatile',
       max_tokens: 1024,
       temperature: 0.7,
       messages: [
@@ -25,23 +24,19 @@ async function callGroq(system: string, messages: any[]): Promise<string> {
     }),
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Groq error ${res.status}: ${err?.error?.message || res.statusText}`);
-  }
-
   const data = await res.json();
+  if (!res.ok) throw new Error(`Groq ${res.status}: ${data?.error?.message || JSON.stringify(data)}`);
   const text = data.choices?.[0]?.message?.content;
-  if (!text) throw new Error('Groq returned empty response');
+  if (!text) throw new Error('Groq returned empty content');
   return text;
 }
 
-// ─── Gemini ───────────────────────────────────────────────────────────────────
 async function callGemini(system: string, messages: any[]): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('GEMINI_API_KEY not set in environment variables');
 
-  // Convert OpenAI-style messages to Gemini format
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+
   const geminiContents = messages.map((m: any) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
@@ -53,26 +48,20 @@ async function callGemini(system: string, messages: any[]): Promise<string> {
     body: JSON.stringify({
       system_instruction: { parts: [{ text: system }] },
       contents: geminiContents,
-      generationConfig: {
-        maxOutputTokens: 1024,
-        temperature: 0.7,
-      },
+      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
     }),
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Gemini error ${res.status}: ${err?.error?.message || res.statusText}`);
-  }
-
   const data = await res.json();
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${data?.error?.message || JSON.stringify(data)}`);
   const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error('Gemini returned empty response');
+  if (!text) throw new Error(`Gemini empty content. Response: ${JSON.stringify(data).slice(0, 300)}`);
   return text;
 }
 
-// ─── Route handler ────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
+  const errors: string[] = [];
+
   try {
     const body = await request.json();
     const { messages, system } = body;
@@ -81,48 +70,31 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
 
-    let reply = '';
-    let usedProvider = '';
-    let lastError = '';
-
-    // ── Try Groq first ────────────────────────────────────────────────────
-    if (process.env.GROQ_API_KEY) {
-      try {
-        reply = await callGroq(system, messages);
-        usedProvider = 'groq';
-      } catch (err: any) {
-        lastError = err.message;
-        console.warn('[Omega] Groq failed, trying Gemini:', err.message);
-      }
+    // ── Try Groq ──────────────────────────────────────────────────────────
+    try {
+      const reply = await callGroq(system, messages);
+      return NextResponse.json({ content: [{ type: 'text', text: reply }], provider: 'groq' });
+    } catch (err: any) {
+      errors.push(`Groq: ${err.message}`);
+      console.error('[Omega/Groq]', err.message);
     }
 
-    // ── Fall back to Gemini ───────────────────────────────────────────────
-    if (!reply && process.env.GEMINI_API_KEY) {
-      try {
-        reply = await callGemini(system, messages);
-        usedProvider = 'gemini';
-      } catch (err: any) {
-        lastError = err.message;
-        console.error('[Omega] Gemini also failed:', err.message);
-      }
+    // ── Try Gemini ────────────────────────────────────────────────────────
+    try {
+      const reply = await callGemini(system, messages);
+      return NextResponse.json({ content: [{ type: 'text', text: reply }], provider: 'gemini' });
+    } catch (err: any) {
+      errors.push(`Gemini: ${err.message}`);
+      console.error('[Omega/Gemini]', err.message);
     }
 
-    // ── Both failed ───────────────────────────────────────────────────────
-    if (!reply) {
-      return NextResponse.json(
-        { error: 'Omega is currently unavailable. Please try again shortly.', detail: lastError },
-        { status: 503 }
-      );
-    }
-
-    // Return in the same shape OmegaChat.tsx expects
-    return NextResponse.json({
-      content: [{ type: 'text', text: reply }],
-      provider: usedProvider,
-    });
+    // ── Both failed — return full error details ───────────────────────────
+    return NextResponse.json(
+      { error: 'Both providers failed', details: errors },
+      { status: 503 }
+    );
 
   } catch (err: any) {
-    console.error('[Omega route]', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: `Route error: ${err.message}` }, { status: 500 });
   }
 }

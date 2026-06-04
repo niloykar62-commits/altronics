@@ -86,27 +86,34 @@ export default function OmegaChat({
     setLoading(true);
 
     try {
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
+      // Call our server-side proxy — direct browser→Anthropic is blocked by CORS
+      const res = await fetch('/api/omega', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
           system: buildSystemPrompt(mode, initialContext, username),
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
         }),
       });
 
       const data = await res.json();
-      if (data.error) throw new Error(data.error.message);
+
+      if (data.error) {
+        // Show real error so we can diagnose issues
+        const detail = data.details ? '\n' + data.details.join('\n') : '';
+        throw new Error(data.error + detail);
+      }
 
       const reply = data.content?.find((b: any) => b.type === 'text')?.text || '';
+      if (!reply) throw new Error('Empty response from AI');
+
       const updated = [...newMessages, { role: 'assistant' as const, content: reply }];
       setMessages(updated);
       if (onResult) onResult(reply);
 
     } catch (err: any) {
-      setError('Omega is unavailable right now. Try again in a moment.');
+      // Show the real error message instead of generic text
+      setError('⚠️ ' + (err.message || 'Unknown error'));
       console.error('[Omega]', err);
     }
     setLoading(false);
