@@ -126,8 +126,8 @@ function CirclesContent() {
 
             {/* Privacy notice */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderRadius: 12, background: 'rgba(139,92,246,0.06)', border: '0.5px solid rgba(139,92,246,0.15)', margin: '14px 0 0' }}>
-              <span style={{ fontSize: 13 }}>🔐</span>
-              <p style={{ color: '#6b7280', fontSize: 12, margin: 0, lineHeight: 1.4 }}>Circles are end-to-end encrypted. Your posts never leave your circle.</p>
+              <span style={{ fontSize: 13 }}>🔒</span>
+              <p style={{ color: '#6b7280', fontSize: 12, margin: 0, lineHeight: 1.4 }}>Circles are private. Only members you invite can see posts inside.</p>
             </div>
 
             {/* Tabs */}

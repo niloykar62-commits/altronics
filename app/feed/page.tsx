@@ -100,18 +100,13 @@ export default function Feed() {
     setImage(file); setImagePreview(URL.createObjectURL(file));
   };
 
-  // ✅ Fixed with debug logs
+  // ✅ Fixed imageUrl: imageUrl ?? null
   const uploadToCloudinary = async (file: File): Promise<string> => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('upload_preset', UPLOAD_PRESET!);
-    console.log('Uploading to Cloudinary...');
-    console.log('CLOUD_NAME:', CLOUD_NAME);
-    console.log('UPLOAD_PRESET:', UPLOAD_PRESET);
     const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: 'POST', body: formData });
     const data = await res.json();
-    console.log('Cloudinary full response:', data);
-    console.log('secure_url:', data.secure_url);
     if (!data.secure_url) {
       throw new Error('Cloudinary upload failed: ' + (data.error?.message || 'No URL returned'));
     }
@@ -126,7 +121,6 @@ export default function Feed() {
     try {
       let imageUrl: string | null = null;
       if (image) imageUrl = await uploadToCloudinary(image);
-      console.log('Final imageUrl before saving:', imageUrl);
       await addDoc(collection(db, 'posts'), {
         userId: user.uid,
         username: userProfile?.username || 'anonymous',

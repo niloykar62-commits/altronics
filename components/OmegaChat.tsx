@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { auth } from '@/lib/firebase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Message {
@@ -11,25 +12,10 @@ interface Message {
 interface OmegaChatProps {
   userProfile?: any;
   initialPrompt?: string;        // pre-fill the input (from post/message assistant)
-  initialContext?: string;       // context injected into system prompt
+  initialContext?: string;       // kept for API compat but no longer sent to server
   mode?: 'chat' | 'post' | 'reply' | 'caption' | 'game';
   onResult?: (text: string) => void;  // callback for assistant modes
   onClose?: () => void;
-}
-
-// ─── Omega system prompt ──────────────────────────────────────────────────────
-function buildSystemPrompt(mode: string, context: string, username: string): string {
-  const base = `You are Omega, the AI assistant built into Altronics — a social media platform. You are helpful, friendly, creative, and concise. You know you are Omega by Altronics, not Claude or any other AI. The user's name is ${username || 'there'}.`;
-
-  const modes: Record<string, string> = {
-    chat: `${base} Help with anything the user asks — social media ideas, captions, advice, questions, or just chat. Keep responses short and conversational unless detail is needed.`,
-    post: `${base} You help users write engaging social media posts for Altronics. Write punchy, authentic posts. Keep them under 280 characters unless asked for longer. Offer 2-3 variations when possible. Use emojis tastefully.`,
-    reply: `${base} You help users craft replies to messages. Be natural and match the tone of the conversation. ${context ? `Context: ${context}` : ''}`,
-    caption: `${base} You write creative captions with relevant hashtags for social media posts and stories. Make them catchy and authentic. Include 3-5 relevant hashtags.`,
-    game: `${base} You are the game master for Altronics entertainment games. Generate fun Emoji Decode puzzles (3 emojis that represent a movie/song/show), Hot Takes (bold opinions for voting), and Word Duel challenges. Be creative and fun.`,
-  };
-
-  return modes[mode] || modes.chat;
 }
 
 // ─── Quick suggestion chips per mode ─────────────────────────────────────────
@@ -86,22 +72,29 @@ export default function OmegaChat({
     setLoading(true);
 
     try {
-      // Call our server-side proxy — direct browser→Anthropic is blocked by CORS
+      // Get the current user's Firebase ID token for server-side auth verification
+      const currentUser = auth.currentUser;
+      if (!currentUser) throw new Error('You must be logged in to use Omega.');
+      const idToken = await currentUser.getIdToken();
+
       const res = await fetch('/api/omega', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`,
+        },
         body: JSON.stringify({
-          system: buildSystemPrompt(mode, initialContext, username),
+          // System prompt is now built server-side — we only send mode + username
+          mode,
+          username,
           messages: newMessages.map(m => ({ role: m.role, content: m.content })),
         }),
       });
 
       const data = await res.json();
 
-      if (data.error) {
-        // Show real error so we can diagnose issues
-        const detail = data.details ? '\n' + data.details.join('\n') : '';
-        throw new Error(data.error + detail);
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'AI service unavailable');
       }
 
       const reply = data.content?.find((b: any) => b.type === 'text')?.text || '';
@@ -112,8 +105,7 @@ export default function OmegaChat({
       if (onResult) onResult(reply);
 
     } catch (err: any) {
-      // Show the real error message instead of generic text
-      setError('⚠️ ' + (err.message || 'Unknown error'));
+      setError('⚠️ ' + (err.message || 'Something went wrong'));
       console.error('[Omega]', err);
     }
     setLoading(false);
