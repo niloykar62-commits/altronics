@@ -21,7 +21,7 @@ const nextConfig: NextConfig = {
               "img-src 'self' data: blob: https: http:",
               "media-src 'self' blob: https: https://drive.google.com https://*.googleusercontent.com",
               // Added /api/drive-proxy so the <video> src is allowed
-              "connect-src 'self' http://127.0.0.1:7765 https://*.googleapis.com https://*.firebase.io wss://*.firebaseio.com https://api.cloudinary.com https://noembed.com https://vimeo.com https://api.dailymotion.com https://static-cdn.jtvnw.net https://drive.google.com https://inv.nadeko.net https://meet.jit.si wss://meet.jit.si",
+              "connect-src 'self' https://*.googleapis.com https://*.firebase.io wss://*.firebaseio.com https://api.cloudinary.com https://noembed.com https://vimeo.com https://api.dailymotion.com https://static-cdn.jtvnw.net https://drive.google.com https://inv.nadeko.net https://meet.jit.si wss://meet.jit.si",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "worker-src 'self' blob:",

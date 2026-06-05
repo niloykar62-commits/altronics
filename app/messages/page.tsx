@@ -229,10 +229,6 @@ function MessagesInner() {
     const groupId = searchParams.get('group');
     if (!dmId && !groupId) return;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',location:'messages/page.tsx:deepLink',message:'deep link params detected',data:{dmId,groupId,allUsersCount:allUsers.length,groupsCount:groups.length},timestamp:Date.now(),hypothesisId:'H1-H2'})}).catch(()=>{});
-    // #endregion
-
     const run = async () => {
       let ok = false;
       let notFound = false;
@@ -243,9 +239,6 @@ function MessagesInner() {
             const uDoc = await getDoc(doc(db, 'users', dmId));
             notFound = !uDoc.exists();
           }
-          // #region agent log
-          fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'messages/page.tsx:deepLink:dm',message:'dm deep link result',data:{dmId,ok,notFound,inAllUsers:allUsers.some((u:any)=>u.id===dmId)},timestamp:Date.now(),hypothesisId:'H2-H3'})}).catch(()=>{});
-          // #endregion
         } else if (groupId) {
           ok = await openGroupById(groupId);
           if (!ok) {
@@ -257,14 +250,9 @@ function MessagesInner() {
             ]);
             notFound = !gDoc.exists() && !m.exists() && !g.exists() && !w.exists();
           }
-          // #region agent log
-          fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'messages/page.tsx:deepLink:group',message:'group deep link result',data:{groupId,ok,notFound,inGroups:groups.some((g:any)=>g.id===groupId)},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-          // #endregion
         }
-      } catch (err: any) {
-        // #region agent log
-        fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'messages/page.tsx:deepLink:error',message:'deep link error',data:{error:err?.message},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-        // #endregion
+      } catch {
+        // deep link failed — allow retry on next effect run
       }
       if (ok || notFound) {
         deepLinkHandled.current = true;

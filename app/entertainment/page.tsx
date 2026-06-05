@@ -1127,10 +1127,6 @@ function EntertainmentPageInner() {
     }
     if (!roomId || deepLinkHandled.current) return;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',location:'entertainment/page.tsx:deepLink',message:'entertainment deep link',data:{tabParam,roomId,musicRooms:musicRooms.length,gameRooms:gameRooms.length,watchRooms:watchRooms.length},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-    // #endregion
-
     const effectiveTab = tabParam === 'music' || tabParam === 'watch' || tabParam === 'games' ? tabParam : tab;
     let opened = false;
     if (effectiveTab === 'music') {
@@ -1146,9 +1142,6 @@ function EntertainmentPageInner() {
     if (opened) {
       deepLinkHandled.current = true;
       window.history.replaceState({}, '', '/entertainment');
-      // #region agent log
-      fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',location:'entertainment/page.tsx:deepLink:open',message:'entertainment room opened',data:{roomId,effectiveTab},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
     }
   }, [pageLoading, user, searchParams, tab, musicRooms, gameRooms, watchRooms]);
 

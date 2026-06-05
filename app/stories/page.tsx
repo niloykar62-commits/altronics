@@ -77,24 +77,13 @@ function StoriesInner() {
     const userId = searchParams.get('user');
     if (!userId) return;
 
-    // #region agent log
-    fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',location:'stories/page.tsx:deepLink',message:'story user param detected',data:{userId,groupedCount:groupedStories.length,hasGroup:groupedStories.some((g:any)=>g.userId===userId)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
-
     const group = groupedStories.find((g: any) => g.userId === userId);
     if (group) {
       deepLinkHandled.current = true;
       openStory(group);
       window.history.replaceState({}, '', '/stories');
-      // #region agent log
-      fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'stories/page.tsx:deepLink:open',message:'story opened via deep link',data:{userId,storyCount:group.stories?.length},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
     } else {
-      // Stories finished loading but this user has no active story
       deepLinkHandled.current = true;
-      // #region agent log
-      fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'stories/page.tsx:deepLink:notFound',message:'story user not found',data:{userId,groupedCount:groupedStories.length},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
     }
   }, [pageLoading, groupedStories, searchParams]);
 
