@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
@@ -14,7 +14,7 @@ import Navbar from '@/components/Navbar';
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
 const STORIES_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_STORIES_PRESET || 'altronics_stories';
 
-export default function Stories() {
+function StoriesInner() {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [groupedStories, setGroupedStories] = useState<any[]>([]);
@@ -28,6 +28,8 @@ export default function Stories() {
   const [showReply, setShowReply] = useState(false);
   const [replies, setReplies] = useState<any[]>([]);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const deepLinkHandled = useRef(false);
 
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
 
@@ -68,6 +70,33 @@ export default function Stories() {
     }, 100);
     return () => clearInterval(interval);
   }, [selectedGroup, currentStoryIndex, paused]);
+
+  // ── Deep link: /stories?user=<userId> ───────────────────────────────────
+  useEffect(() => {
+    if (pageLoading || deepLinkHandled.current) return;
+    const userId = searchParams.get('user');
+    if (!userId) return;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',location:'stories/page.tsx:deepLink',message:'story user param detected',data:{userId,groupedCount:groupedStories.length,hasGroup:groupedStories.some((g:any)=>g.userId===userId)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+    // #endregion
+
+    const group = groupedStories.find((g: any) => g.userId === userId);
+    if (group) {
+      deepLinkHandled.current = true;
+      openStory(group);
+      window.history.replaceState({}, '', '/stories');
+      // #region agent log
+      fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'stories/page.tsx:deepLink:open',message:'story opened via deep link',data:{userId,storyCount:group.stories?.length},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
+    } else {
+      // Stories finished loading but this user has no active story
+      deepLinkHandled.current = true;
+      // #region agent log
+      fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'stories/page.tsx:deepLink:notFound',message:'story user not found',data:{userId,groupedCount:groupedStories.length},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
+    }
+  }, [pageLoading, groupedStories, searchParams]);
 
   const loadStories = async () => {
     try {
@@ -456,5 +485,17 @@ export default function Stories() {
 
       </div>
     </div>
+  );
+}
+
+export default function Stories() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: '#a78bfa', fontWeight: 700 }}>ALTRONICS</p>
+      </div>
+    }>
+      <StoriesInner />
+    </Suspense>
   );
 }

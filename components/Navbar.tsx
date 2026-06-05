@@ -89,9 +89,11 @@ export default function Navbar() {
   const navItems = [
     { href: '/feed',          icon: '🏠', label: 'Home'    },
     { href: '/search',        icon: '🔍', label: 'Search'  },
+    { href: '/stories',       icon: '✨', label: 'Stories' },
     { href: '/circles',       icon: '⭕', label: 'Circles' },
     { href: '/messages',      icon: '💬', label: 'DMs'     },
     { href: '/entertainment', icon: '🎉', label: 'Fun'     },
+    { href: '/bookmarks',     icon: '🔖', label: 'Saved'   },
     { href: '/notifications', icon: '🔔', label: 'Alerts', badge: unreadCount },
     { href: '/profile',       icon: null, label: 'Profile', isAvatar: true },
   ];
@@ -233,7 +235,9 @@ export default function Navbar() {
             const isActive =
               pathname === href ||
               (href === '/entertainment' && (pathname.startsWith('/entertainment') || pathname.startsWith('/games') || pathname.startsWith('/music'))) ||
+              (href === '/stories' && pathname.startsWith('/stories')) ||
               (href === '/circles' && pathname.startsWith('/circles')) ||
+              (href === '/bookmarks' && pathname.startsWith('/bookmarks')) ||
               (href !== '/feed' && href !== '/entertainment' && pathname.startsWith(href));
 
             return (

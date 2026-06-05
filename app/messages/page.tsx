@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { auth, db } from '@/lib/firebase';
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
@@ -15,7 +15,7 @@ import {
 import Navbar from '@/components/Navbar';
 import EmojiPicker, { QuickReactionBar, ReactionBubbles } from '@/components/EmojiPicker';
 
-export default function Messages() {
+function MessagesInner() {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -47,7 +47,9 @@ export default function Messages() {
   const [mentionQuery, setMentionQuery] = useState('');           // text after # in input
   const [mentionSuggestions, setMentionSuggestions] = useState<any[]>([]); // users shown in dropdown
   const inputRef = useRef<HTMLInputElement>(null);
+  const deepLinkHandled = useRef(false);
   const { push } = useRouter();
+  const searchParams = useSearchParams();
 
   // ── Emoji state ───────────────────────────────────────────────────────────
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -165,9 +167,26 @@ export default function Messages() {
     const convId = getConversationId(user.uid, otherUser.id);
     setSelectedChat({ type: 'dm', id: convId, name: otherUser.fullName, username: otherUser.username, otherUser });
     setInCall(false);
+    setActiveTab('dms');
     await loadMessages('conversations', convId);
     await markMessagesAsSeen('conversations', convId);
   };
+
+  const openDMByUserId = useCallback(async (otherUserId: string) => {
+    if (!user) return false;
+    try {
+      let otherUser = allUsers.find((u: any) => u.id === otherUserId);
+      if (!otherUser) {
+        const uDoc = await getDoc(doc(db, 'users', otherUserId));
+        if (uDoc.exists()) otherUser = { id: otherUserId, ...uDoc.data() };
+      }
+      if (!otherUser) return false;
+      await openDM(otherUser);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [user, allUsers]);
 
   const openGroup = async (group: any) => {
     // Load full group doc for admin/member info
@@ -176,9 +195,84 @@ export default function Messages() {
     setSelectedChat({ type: 'group', id: group.id, name: fullGroup.name, memberCount: fullGroup.members?.length || 0, groupData: fullGroup });
     setInCall(false);
     setShowGroupInfo(false);
+    setActiveTab('groups');
     await loadMessages('groups', group.id);
     await loadGroupInfo(group.id);
   };
+
+  const openGroupById = useCallback(async (groupId: string) => {
+    let group = groups.find((g: any) => g.id === groupId);
+    if (!group) {
+      const gDoc = await getDoc(doc(db, 'groups', groupId));
+      if (gDoc.exists()) group = { id: groupId, ...gDoc.data() };
+    }
+    if (group) {
+      await openGroup(group);
+      return true;
+    }
+    // Legacy notifications may send entertainment room IDs as group_invite
+    const [musicDoc, gameDoc, watchDoc] = await Promise.all([
+      getDoc(doc(db, 'musicRooms', groupId)),
+      getDoc(doc(db, 'gameRooms', groupId)),
+      getDoc(doc(db, 'watchRooms', groupId)),
+    ]);
+    if (musicDoc.exists()) { push(`/entertainment?tab=music&room=${groupId}`); return true; }
+    if (gameDoc.exists()) { push(`/entertainment?tab=games&room=${groupId}`); return true; }
+    if (watchDoc.exists()) { push(`/entertainment?tab=watch&room=${groupId}`); return true; }
+    return false;
+  }, [groups, push]);
+
+  // ── Deep link: /messages?dm=<userId> or ?group=<groupId> ─────────────────
+  useEffect(() => {
+    if (pageLoading || !user || deepLinkHandled.current) return;
+    const dmId = searchParams.get('dm');
+    const groupId = searchParams.get('group');
+    if (!dmId && !groupId) return;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',location:'messages/page.tsx:deepLink',message:'deep link params detected',data:{dmId,groupId,allUsersCount:allUsers.length,groupsCount:groups.length},timestamp:Date.now(),hypothesisId:'H1-H2'})}).catch(()=>{});
+    // #endregion
+
+    const run = async () => {
+      let ok = false;
+      let notFound = false;
+      try {
+        if (dmId) {
+          ok = await openDMByUserId(dmId);
+          if (!ok) {
+            const uDoc = await getDoc(doc(db, 'users', dmId));
+            notFound = !uDoc.exists();
+          }
+          // #region agent log
+          fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'messages/page.tsx:deepLink:dm',message:'dm deep link result',data:{dmId,ok,notFound,inAllUsers:allUsers.some((u:any)=>u.id===dmId)},timestamp:Date.now(),hypothesisId:'H2-H3'})}).catch(()=>{});
+          // #endregion
+        } else if (groupId) {
+          ok = await openGroupById(groupId);
+          if (!ok) {
+            const gDoc = await getDoc(doc(db, 'groups', groupId));
+            const [m, g, w] = await Promise.all([
+              getDoc(doc(db, 'musicRooms', groupId)),
+              getDoc(doc(db, 'gameRooms', groupId)),
+              getDoc(doc(db, 'watchRooms', groupId)),
+            ]);
+            notFound = !gDoc.exists() && !m.exists() && !g.exists() && !w.exists();
+          }
+          // #region agent log
+          fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'messages/page.tsx:deepLink:group',message:'group deep link result',data:{groupId,ok,notFound,inGroups:groups.some((g:any)=>g.id===groupId)},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+          // #endregion
+        }
+      } catch (err: any) {
+        // #region agent log
+        fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',runId:'post-fix',location:'messages/page.tsx:deepLink:error',message:'deep link error',data:{error:err?.message},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+        // #endregion
+      }
+      if (ok || notFound) {
+        deepLinkHandled.current = true;
+        if (ok && (dmId || groupId)) window.history.replaceState({}, '', '/messages');
+      }
+    };
+    run();
+  }, [pageLoading, user, allUsers, groups, searchParams, openDMByUserId, openGroupById]);
 
   const loadGroupInfo = async (groupId: string) => {
     try {
@@ -1489,5 +1583,17 @@ export default function Messages() {
         )}
       </nav>
     </div>
+  );
+}
+
+export default function Messages() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: '#a78bfa', fontWeight: 700 }}>ALTRONICS</p>
+      </div>
+    }>
+      <MessagesInner />
+    </Suspense>
   );
 }

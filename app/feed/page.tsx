@@ -211,7 +211,7 @@ export default function Feed() {
         originalAuthor: post.fullName, originalUsername: post.username,
       });
       await updateDoc(doc(db, 'posts', post.id), { reposts: arrayUnion(user.uid) });
-      await sendNotification(post.userId, 'repost');
+      await sendNotification(post.userId, 'repost', { postId: post.id });
       await loadPosts(followingIds);
     } catch (err) { console.error(err); }
     setRepostingId(null);

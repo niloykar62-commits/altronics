@@ -10,18 +10,18 @@ const nextConfig: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
+          { key: 'Permissions-Policy', value: 'camera=(self https://meet.jit.si), microphone=(self https://meet.jit.si), geolocation=(), payment=()' },
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
           {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.youtube.com https://s.ytimg.com https://apis.google.com https://cdn.jsdelivr.net",
-              "frame-src 'self' https://www.youtube.com https://player.vimeo.com https://www.dailymotion.com https://player.twitch.tv",
+              "frame-src 'self' https://www.youtube.com https://player.vimeo.com https://www.dailymotion.com https://player.twitch.tv https://meet.jit.si",
               "img-src 'self' data: blob: https: http:",
               "media-src 'self' blob: https: https://drive.google.com https://*.googleusercontent.com",
               // Added /api/drive-proxy so the <video> src is allowed
-              "connect-src 'self' https://*.googleapis.com https://*.firebase.io wss://*.firebaseio.com https://api.cloudinary.com https://noembed.com https://vimeo.com https://api.dailymotion.com https://static-cdn.jtvnw.net https://drive.google.com",
+              "connect-src 'self' http://127.0.0.1:7765 https://*.googleapis.com https://*.firebase.io wss://*.firebaseio.com https://api.cloudinary.com https://noembed.com https://vimeo.com https://api.dailymotion.com https://static-cdn.jtvnw.net https://drive.google.com https://inv.nadeko.net https://meet.jit.si wss://meet.jit.si",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "worker-src 'self' blob:",

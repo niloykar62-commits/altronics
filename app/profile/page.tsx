@@ -73,9 +73,11 @@ export default function Profile() {
   const [newFullName, setNewFullName] = useState('');
   const [newBio, setNewBio] = useState('');
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'posts' | 'liked'>('posts');
+  const [activeTab, setActiveTab] = useState<'posts' | 'liked' | 'bookmarks'>('posts');
   const [likedPosts, setLikedPosts] = useState<any[]>([]);
   const [likedLoading, setLikedLoading] = useState(false);
+  const [bookmarkedPosts, setBookmarkedPosts] = useState<any[]>([]);
+  const [bookmarksLoading, setBookmarksLoading] = useState(false);
 
   // ── Profile pic ───────────────────────────────────────────────────────────
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -164,6 +166,24 @@ export default function Profile() {
       const snap = await getDocs(q);
       setPosts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) { console.error(err); }
+  };
+
+  const loadBookmarkedPosts = async (uid: string) => {
+    if (bookmarkedPosts.length > 0) return;
+    setBookmarksLoading(true);
+    try {
+      const profileDoc = await getDoc(doc(db, 'users', uid));
+      const bookmarkIds: string[] = profileDoc.exists() ? (profileDoc.data().bookmarks || []) : [];
+      if (bookmarkIds.length === 0) { setBookmarkedPosts([]); return; }
+      const chunks: string[][] = [];
+      for (let i = 0; i < bookmarkIds.length; i += 30) chunks.push(bookmarkIds.slice(i, i + 30));
+      const results = await Promise.all(
+        chunks.map(chunk => getDocs(query(collection(db, 'posts'), where('__name__', 'in', chunk))))
+      );
+      const posts = results.flatMap(snap => snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setBookmarkedPosts(bookmarkIds.map(id => posts.find((p: any) => p.id === id)).filter(Boolean));
+    } catch (err) { console.error(err); }
+    setBookmarksLoading(false);
   };
 
   const loadLikedPosts = async (uid: string) => {
@@ -749,13 +769,14 @@ export default function Profile() {
 
             {/* ── Tabs ── */}
             <div style={{ display: 'flex', borderBottom: '0.5px solid rgba(255,255,255,0.06)', marginTop: 4 }}>
-              {(['posts', 'liked'] as const).map(tab => (
+              {(['posts', 'liked', 'bookmarks'] as const).map(tab => (
                 <button type="button" key={tab} onClick={() => {
                   setActiveTab(tab);
                   if (tab === 'liked' && user) loadLikedPosts(user.uid);
+                  if (tab === 'bookmarks' && user) loadBookmarkedPosts(user.uid);
                 }}
-                  style={{ flex: 1, padding: '12px 0', background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid var(--accent-purple)' : '2px solid transparent', color: activeTab === tab ? 'var(--accent-purple-light)' : 'var(--text-muted)', fontSize: 13, fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize', transition: 'all 0.2s', fontFamily: 'Inter,sans-serif' }}>
-                  {tab === 'posts' ? `⚡ Posts` : '❤️ Liked'}
+                  style={{ flex: 1, padding: '12px 0', background: 'none', border: 'none', borderBottom: activeTab === tab ? '2px solid var(--accent-purple)' : '2px solid transparent', color: activeTab === tab ? 'var(--accent-purple-light)' : 'var(--text-muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'Inter,sans-serif' }}>
+                  {tab === 'posts' ? '⚡ Posts' : tab === 'liked' ? '❤️ Liked' : '🔖 Saved'}
                 </button>
               ))}
             </div>
@@ -833,6 +854,38 @@ export default function Profile() {
                       <span style={{ fontSize: 12, color: '#f472b6' }}>❤️ {post.likes?.length || 0}</span>
                       <span style={{ fontSize: 12, color: 'var(--accent-blue-light)' }}>💬 {post.comments?.length || 0}</span>
                     </div>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+
+          {/* ── BOOKMARKS TAB ── */}
+          {activeTab === 'bookmarks' && (
+            bookmarksLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 20px' }}>
+                <div style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid rgba(139,92,246,0.3)', borderTopColor: '#a78bfa', animation: 'spin 0.8s linear infinite' }} />
+              </div>
+            ) : bookmarkedPosts.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+                <p style={{ fontSize: 32, marginBottom: 12 }}>🔖</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>No saved posts yet.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 6 }}>Bookmark posts from your feed to see them here.</p>
+              </div>
+            ) : bookmarkedPosts.map((post: any) => (
+              <div key={post.id} style={{ padding: '16px 0', borderBottom: '0.5px solid var(--border-subtle)', cursor: 'pointer' }}
+                onClick={() => push(`/post/${post.id}`)}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', background: 'var(--gradient)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'white', flexShrink: 0 }}>
+                    {post.fullName?.[0]?.toUpperCase() || 'U'}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{post.fullName}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{post.username}</span>
+                    </div>
+                    {post.content && <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 10 }}>{post.content}</p>}
+                    {post.imageUrl && <img src={post.imageUrl} alt="" style={{ width: '100%', borderRadius: 12, maxHeight: 200, objectFit: 'cover', marginBottom: 10, border: '0.5px solid var(--border-subtle)' }} />}
                   </div>
                 </div>
               </div>

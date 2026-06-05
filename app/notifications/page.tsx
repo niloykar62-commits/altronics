@@ -78,10 +78,21 @@ export default function Notifications() {
         router.push(`/messages?dm=${n.fromUserId}`);
         break;
 
-      // Group invite → /messages?group=<groupId>
+      // Chat group invite → /messages?group=<groupId>
       case 'group_invite':
         if (n.groupId) router.push(`/messages?group=${n.groupId}`);
         else router.push('/messages');
+        break;
+
+      // Entertainment room invites → /entertainment?tab=...&room=...
+      case 'music_invite':
+        router.push(`/entertainment?tab=music&room=${n.roomId || n.groupId || ''}`);
+        break;
+      case 'game_invite':
+        router.push(`/entertainment?tab=games&room=${n.roomId || n.groupId || ''}`);
+        break;
+      case 'watch_invite':
+        router.push(`/entertainment?tab=watch&room=${n.roomId || n.groupId || ''}`);
         break;
 
       // Mention in a message → open that DM/group
@@ -127,6 +138,9 @@ export default function Notifications() {
       case 'story_like': return '❤️';
       case 'story_reply': return '💬';
       case 'group_invite': return '👥';
+      case 'music_invite': return '🎵';
+      case 'game_invite': return '🎮';
+      case 'watch_invite': return '🎬';
       case 'mention': return '💜';
       default: return '🔔';
     }
@@ -142,6 +156,9 @@ export default function Notifications() {
       case 'repost': return 'rgba(52,211,153,0.15)';
       case 'message': return 'rgba(251,191,36,0.15)';
       case 'group_invite': return 'rgba(139,92,246,0.15)';
+      case 'music_invite':
+      case 'game_invite':
+      case 'watch_invite': return 'rgba(139,92,246,0.15)';
       case 'mention': return 'rgba(167,139,250,0.15)';
       default: return 'rgba(139,92,246,0.15)';
     }
@@ -157,6 +174,9 @@ export default function Notifications() {
       case 'story_like': return 'liked your story ✨';
       case 'story_reply': return `replied to your story: "${n.replyText}"`;
       case 'group_invite': return `added you to group "${n.groupName}" 👥`;
+      case 'music_invite': return `invited you to music room "${n.groupName || n.roomName}" 🎵`;
+      case 'game_invite': return `invited you to play "${n.groupName || n.roomName}" 🎮`;
+      case 'watch_invite': return `invited you to watch "${n.groupName || n.roomName}" 🎬`;
       case 'mention': return `mentioned you in a message`;
       default: return 'interacted with you';
     }
@@ -226,6 +246,7 @@ export default function Notifications() {
                     {timeAgo(n.createdAt)}
                     <span style={{ fontSize: 10, color: '#6b7280', background: 'rgba(255,255,255,0.05)', borderRadius: 6, padding: '1px 6px' }}>
                       {n.type === 'message' || n.type === 'mention' || n.type === 'group_invite' ? '→ Open chat' :
+                       n.type === 'music_invite' || n.type === 'game_invite' || n.type === 'watch_invite' ? '→ Join room' :
                        n.type === 'follow' ? '→ View profile' :
                        n.type === 'like' || n.type === 'comment' || n.type === 'repost' ? '→ View post' :
                        n.type === 'story_like' || n.type === 'story_reply' ? '→ View story' : '→ Open'}

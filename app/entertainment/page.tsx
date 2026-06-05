@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useEffect, useState, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
@@ -1019,8 +1019,10 @@ function WatchRoomView({ room, user, userProfile, onLeave }: { room: WatchRoom; 
 // ══════════════════════════════════════════════════════════════════════════════
 // MAIN ENTERTAINMENT PAGE
 // ══════════════════════════════════════════════════════════════════════════════
-export default function EntertainmentPage() {
+function EntertainmentPageInner() {
   const { push } = useRouter();
+  const searchParams = useSearchParams();
+  const deepLinkHandled = useRef(false);
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [allUsers, setAllUsers] = useState<any[]>([]);
@@ -1115,6 +1117,41 @@ export default function EntertainmentPage() {
     return () => unsub();
   }, [user, activeWatchRoom?.id]);
 
+  // ── Deep link: /entertainment?tab=music|games|watch&room=<id> ─────────────
+  useEffect(() => {
+    if (pageLoading || !user) return;
+    const tabParam = searchParams.get('tab');
+    const roomId = searchParams.get('room');
+    if (tabParam === 'music' || tabParam === 'watch' || tabParam === 'games') {
+      setTab(tabParam);
+    }
+    if (!roomId || deepLinkHandled.current) return;
+
+    // #region agent log
+    fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',location:'entertainment/page.tsx:deepLink',message:'entertainment deep link',data:{tabParam,roomId,musicRooms:musicRooms.length,gameRooms:gameRooms.length,watchRooms:watchRooms.length},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
+    // #endregion
+
+    const effectiveTab = tabParam === 'music' || tabParam === 'watch' || tabParam === 'games' ? tabParam : tab;
+    let opened = false;
+    if (effectiveTab === 'music') {
+      const room = musicRooms.find((r) => r.id === roomId);
+      if (room) { setActiveMusicRoom(room); opened = true; }
+    } else if (effectiveTab === 'games') {
+      const room = gameRooms.find((r) => r.id === roomId);
+      if (room) { setActiveGameRoom(room); opened = true; }
+    } else if (effectiveTab === 'watch') {
+      const room = watchRooms.find((r) => r.id === roomId);
+      if (room) { setActiveWatchRoom(room); opened = true; }
+    }
+    if (opened) {
+      deepLinkHandled.current = true;
+      window.history.replaceState({}, '', '/entertainment');
+      // #region agent log
+      fetch('http://127.0.0.1:7765/ingest/88558553-9956-4b27-988e-873946619941',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ff7916'},body:JSON.stringify({sessionId:'ff7916',location:'entertainment/page.tsx:deepLink:open',message:'entertainment room opened',data:{roomId,effectiveTab},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
+      // #endregion
+    }
+  }, [pageLoading, user, searchParams, tab, musicRooms, gameRooms, watchRooms]);
+
   // ── Create watch room ─────────────────────────────────────────────────────
   const createWatchRoom = async () => {
     if (!watchRoomName.trim() || !user) return;
@@ -1138,8 +1175,8 @@ export default function EntertainmentPage() {
         await addDoc(collection(db, 'notifications'), {
           toUserId: uid, fromUserId: user.uid,
           fromUsername: userProfile?.username || 'someone',
-          type: 'watch_invite', groupId: ref.id,
-          groupName: watchRoomName.trim(),
+          type: 'watch_invite', roomId: ref.id, groupId: ref.id,
+          roomName: watchRoomName.trim(), groupName: watchRoomName.trim(),
           read: false, createdAt: serverTimestamp(),
         });
       }
@@ -1169,7 +1206,7 @@ export default function EntertainmentPage() {
         memberIds, members, currentTrack: null, queue: [], createdAt: serverTimestamp(),
       });
       for (const uid of invitedUsers) {
-        await addDoc(collection(db, 'notifications'), { toUserId: uid, fromUserId: user.uid, fromUsername: userProfile?.username || 'someone', type: 'group_invite', groupId: ref.id, groupName: roomName.trim(), read: false, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'notifications'), { toUserId: uid, fromUserId: user.uid, fromUsername: userProfile?.username || 'someone', type: 'music_invite', roomId: ref.id, roomName: roomName.trim(), groupName: roomName.trim(), read: false, createdAt: serverTimestamp() });
       }
       setShowCreateMusic(false); setRoomName(''); setInvitedUsers(''.split(''));
       setInvitedUsers([]);
@@ -1197,7 +1234,7 @@ export default function EntertainmentPage() {
         createdAt: serverTimestamp(),
       });
       for (const uid of invitedUsers) {
-        await addDoc(collection(db, 'notifications'), { toUserId: uid, fromUserId: user.uid, fromUsername: userProfile?.username || 'someone', type: 'group_invite', groupId: ref.id, groupName: `${GAME_INFO[selectedGame].name} game`, read: false, createdAt: serverTimestamp() });
+        await addDoc(collection(db, 'notifications'), { toUserId: uid, fromUserId: user.uid, fromUsername: userProfile?.username || 'someone', type: 'game_invite', roomId: ref.id, roomName: `${GAME_INFO[selectedGame].name} game`, groupName: `${GAME_INFO[selectedGame].name} game`, read: false, createdAt: serverTimestamp() });
       }
       setShowCreateGame(false); setInvitedUsers([]);
     } catch (err: any) { console.error(err); }
@@ -1565,5 +1602,17 @@ export default function EntertainmentPage() {
         </InviteModal>
       )}
     </>
+  );
+}
+
+export default function EntertainmentPage() {
+  return (
+    <Suspense fallback={
+      <div style={{ minHeight: '100vh', background: '#0a0a0f', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <p style={{ color: '#a78bfa', fontWeight: 700 }}>ALTRONICS</p>
+      </div>
+    }>
+      <EntertainmentPageInner />
+    </Suspense>
   );
 }
