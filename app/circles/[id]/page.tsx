@@ -155,6 +155,20 @@ function CircleDetailContent() {
         lastPostPreview: `${userProfile?.fullName}: ${postText.trim().slice(0, 40) || '📷 Image'}`,
         newPostCount: (circle.newPostCount || 0) + 1,
       });
+      const preview = postText.trim().slice(0, 50) || '📷 Image';
+      for (const uid of (circle.memberIds || []).filter((id: string) => id !== user.uid)) {
+        await addDoc(collection(db, 'notifications'), {
+          toUserId: uid,
+          fromUserId: user.uid,
+          fromUsername: userProfile?.username || 'someone',
+          type: 'circle_post',
+          circleId,
+          circleName: circle.name,
+          postPreview: preview,
+          read: false,
+          createdAt: serverTimestamp(),
+        });
+      }
       setPostText(''); setPostImage(null); setPostImagePreview(null);
     } catch (err) { console.error(err); }
     setPosting(false);
@@ -216,6 +230,16 @@ function CircleDetailContent() {
       await updateDoc(doc(db, 'circles', circleId), {
         memberIds: arrayUnion(uid),
         members: arrayUnion({ uid, name: u?.fullName || 'Member', photoURL: u?.photoURL || '', role: 'member' }),
+      });
+      await addDoc(collection(db, 'notifications'), {
+        toUserId: uid,
+        fromUserId: user.uid,
+        fromUsername: userProfile?.username || 'someone',
+        type: 'circle_invite',
+        circleId,
+        circleName: circle.name,
+        read: false,
+        createdAt: serverTimestamp(),
       });
     } catch (err) { console.error(err); }
     setInviting(null);

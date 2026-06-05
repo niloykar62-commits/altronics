@@ -89,10 +89,22 @@ export default function Search() {
     setFilteredPosts(posts);
   };
 
-  const handleSearch = (q: string) => {
+  const handleSearch = (q: string, forceTab?: 'users' | 'posts') => {
     setSearchQuery(q);
-    const lower = q.toLowerCase();
-    if (!q.trim()) { setFilteredUsers(allUsers); setFilteredPosts(allPosts); return; }
+    const trimmed = q.trim();
+    if (!trimmed) { setFilteredUsers(allUsers); setFilteredPosts(allPosts); return; }
+    const lower = trimmed.toLowerCase();
+
+    // Hashtag search — match #tag in post content
+    if (lower.startsWith('#')) {
+      if (forceTab) setActiveTab(forceTab);
+      else setActiveTab('posts');
+      setFilteredUsers([]);
+      setFilteredPosts(allPosts.filter((p: any) => p.content?.toLowerCase().includes(lower)));
+      return;
+    }
+
+    if (forceTab) setActiveTab(forceTab);
     setFilteredUsers(allUsers.filter((u: any) =>
       u.username?.toLowerCase().includes(lower) || u.fullName?.toLowerCase().includes(lower) || u.bio?.toLowerCase().includes(lower)
     ));
@@ -195,7 +207,7 @@ export default function Search() {
                   return (
                     <button type="button"
                       key={tag.label}
-                      onClick={() => handleSearch(tag.label)}
+                      onClick={() => handleSearch(tag.label, 'posts')}
                       style={{ padding: '5px 12px', borderRadius: 20, background: c.bg, border: `0.5px solid ${c.border}`, color: c.color, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
                     >
                       {tag.label}
@@ -210,10 +222,11 @@ export default function Search() {
               {/* Explore grid */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 28 }}>
                 {EXPLORE_CARDS.map((card) => (
-                  <div key={card.label} style={{ borderRadius: 16, overflow: 'hidden', background: card.grad, border: '0.5px solid rgba(139,92,246,0.15)', cursor: 'pointer' }}>
+                  <button type="button" key={card.label} onClick={() => handleSearch(card.label, 'posts')}
+                    style={{ borderRadius: 16, overflow: 'hidden', background: card.grad, border: '0.5px solid rgba(139,92,246,0.15)', cursor: 'pointer', padding: 0, textAlign: 'left', width: '100%' }}>
                     <div style={{ height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36 }}>{card.emoji}</div>
                     <div style={{ padding: '8px 12px 12px', fontSize: 12, fontWeight: 600, color: '#9ca3af' }}>{card.label}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
 

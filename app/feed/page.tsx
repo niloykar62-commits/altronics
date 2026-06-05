@@ -1,16 +1,27 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, getDocs, orderBy, query, serverTimestamp, doc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, orderBy, query, limit, startAfter, serverTimestamp, doc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc } from 'firebase/firestore';
 import Navbar from '@/components/Navbar';
 
 const CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME;
 const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET;
 
+const PAGE_SIZE = 20;
+
 const inputStyle = { width: '100%', padding: '12px 16px', background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)', borderRadius: 12, color: '#f3f4f6', fontSize: 14, fontFamily: 'Inter,sans-serif', outline: 'none' };
+
+function postScore(p: any): number {
+  const likes = p.likes?.length || 0;
+  const reposts = p.reposts?.length || 0;
+  const ageMs = p.createdAt?.toDate ? Date.now() - p.createdAt.toDate().getTime() : 0;
+  const hoursOld = ageMs / 3600000;
+  const recencyBoost = Math.max(0, 48 - hoursOld) * 2;
+  return likes * 3 + reposts * 5 + recencyBoost;
+}
 
 function timeAgo(ts: any): string {
   if (!ts?.toDate) return 'Just now';
@@ -41,6 +52,9 @@ export default function Feed() {
   const [followingIds, setFollowingIds] = useState<string[]>([]);   // UIDs this user follows
   const [followerIds, setFollowerIds] = useState<string[]>([]);     // UIDs who follow this user
   const [storyUsers, setStoryUsers] = useState<any[]>([]);          // following users with stories
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const lastDocRef = useRef<any>(null);
   const { push } = useRouter();
 
   useEffect(() => {
@@ -56,10 +70,10 @@ export default function Feed() {
           const followers: string[] = profileData.followers || [];
           setFollowingIds(following);
           setFollowerIds(followers);
-          await loadPosts(following);
+          await loadPosts(true);
           await loadStoryUsers(following, firebaseUser.uid);
         } else {
-          await loadPosts([]);
+          await loadPosts(true);
         }
       } catch (err) { console.error(err); }
       setPageLoading(false);
@@ -67,13 +81,25 @@ export default function Feed() {
     return () => unsubscribe();
   }, []);
 
-  const loadPosts = async (following?: string[]) => {
+  const loadPosts = async (reset = true) => {
     try {
-      const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
+      const base = collection(db, 'posts');
+      const q = reset || !lastDocRef.current
+        ? query(base, orderBy('createdAt', 'desc'), limit(PAGE_SIZE))
+        : query(base, orderBy('createdAt', 'desc'), startAfter(lastDocRef.current), limit(PAGE_SIZE));
       const snapshot = await getDocs(q);
-      const all = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), likes: d.data().likes || [], reposts: d.data().reposts || [] }));
-      setPosts(all);
+      const batch = snapshot.docs.map((d) => ({ id: d.id, ...d.data(), likes: d.data().likes || [], reposts: d.data().reposts || [] }));
+      setPosts((prev) => reset ? batch : [...prev, ...batch]);
+      lastDocRef.current = snapshot.docs.length > 0 ? snapshot.docs[snapshot.docs.length - 1] : lastDocRef.current;
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
     } catch (err) { console.error(err); }
+  };
+
+  const loadMorePosts = async () => {
+    if (!hasMore || loadingMore) return;
+    setLoadingMore(true);
+    await loadPosts(false);
+    setLoadingMore(false);
   };
 
   // Load users you follow who have posted a story in last 24h
@@ -143,7 +169,7 @@ export default function Feed() {
         reposts: [],
       });
       setContent(''); setImage(null); setImagePreview(null);
-      await loadPosts(followingIds);
+      await loadPosts(true);
     } catch (err: any) {
       console.error('Post error:', err);
       alert('Failed to post: ' + err.message);
@@ -153,7 +179,7 @@ export default function Feed() {
 
   const deletePost = async (postId: string) => {
     if (!confirm('Delete this post?')) return;
-    try { await deleteDoc(doc(db, 'posts', postId)); await loadPosts(followingIds); }
+    try { await deleteDoc(doc(db, 'posts', postId)); await loadPosts(true); }
     catch (err) { console.error(err); }
   };
 
@@ -161,7 +187,7 @@ export default function Feed() {
     if (!editContent.trim()) return;
     try {
       await updateDoc(doc(db, 'posts', postId), { content: editContent.trim(), edited: true });
-      setEditingPost(null); await loadPosts(followingIds);
+      setEditingPost(null); await loadPosts(true);
     } catch (err) { console.error(err); }
   };
 
@@ -212,7 +238,7 @@ export default function Feed() {
       });
       await updateDoc(doc(db, 'posts', post.id), { reposts: arrayUnion(user.uid) });
       await sendNotification(post.userId, 'repost', { postId: post.id });
-      await loadPosts(followingIds);
+      await loadPosts(true);
     } catch (err) { console.error(err); }
     setRepostingId(null);
   };
@@ -249,9 +275,10 @@ export default function Feed() {
       return posts.filter((p) => p.userId === user?.uid || followingIds.includes(p.userId));
     }
     if (activeTab === 'foryou') {
-      // For You = following + followers posts (wider circle)
       const socialIds = [...new Set([...followingIds, ...followerIds])];
-      return posts.filter((p) => p.userId === user?.uid || socialIds.includes(p.userId));
+      return posts
+        .filter((p) => p.userId === user?.uid || socialIds.includes(p.userId))
+        .sort((a, b) => postScore(b) - postScore(a));
     }
     if (activeTab === 'trending') {
       // Trending = all posts sorted by likes
@@ -371,7 +398,8 @@ export default function Feed() {
               </button>
             )}
           </div>
-        ) : visiblePosts.map((post) => {
+        ) : (<>
+        {visiblePosts.map((post) => {
           const liked = post.likes?.includes(user?.uid);
           const likeCount = post.likes?.length || 0;
           const isOwner = post.userId === user?.uid;
@@ -502,6 +530,15 @@ export default function Feed() {
             </article>
           );
         })}
+        {hasMore && (
+          <div style={{ padding: '20px', textAlign: 'center' }}>
+            <button type="button" onClick={loadMorePosts} disabled={loadingMore}
+              style={{ padding: '10px 28px', borderRadius: 20, background: 'rgba(139,92,246,0.12)', border: '0.5px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontSize: 13, fontWeight: 700, cursor: loadingMore ? 'not-allowed' : 'pointer', fontFamily: 'Inter,sans-serif', opacity: loadingMore ? 0.6 : 1 }}>
+              {loadingMore ? 'Loading…' : 'Load more posts'}
+            </button>
+          </div>
+        )}
+        </>)}
       </div>
     </div>
   );

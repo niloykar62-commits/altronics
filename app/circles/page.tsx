@@ -94,7 +94,7 @@ function CirclesContent() {
           return { uid, name: u?.fullName || 'Member', photoURL: u?.photoURL || '', role: 'member' };
         }),
       ];
-      await addDoc(collection(db, 'circles'), {
+      const ref = await addDoc(collection(db, 'circles'), {
         name: circleName.trim(),
         description: circleDesc.trim(),
         emoji: selectedEmoji,
@@ -108,6 +108,18 @@ function CirclesContent() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+      for (const uid of invitedUsers) {
+        await addDoc(collection(db, 'notifications'), {
+          toUserId: uid,
+          fromUserId: user.uid,
+          fromUsername: userProfile?.username || 'someone',
+          type: 'circle_invite',
+          circleId: ref.id,
+          circleName: circleName.trim(),
+          read: false,
+          createdAt: serverTimestamp(),
+        });
+      }
       setShowCreate(false);
       setCircleName(''); setCircleDesc(''); setInvitedUsers([]); setSelectedEmoji('⚡');
     } catch (err: any) {

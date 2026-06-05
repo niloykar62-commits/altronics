@@ -123,6 +123,13 @@ export default function Notifications() {
         else router.push('/profile');
         break;
 
+      // Circle invite / new post → circle page
+      case 'circle_invite':
+      case 'circle_post':
+        if (n.circleId) router.push(`/circles/${n.circleId}`);
+        else router.push('/circles');
+        break;
+
       default:
         router.push('/feed');
     }
@@ -142,6 +149,8 @@ export default function Notifications() {
       case 'game_invite': return '🎮';
       case 'watch_invite': return '🎬';
       case 'mention': return '💜';
+      case 'circle_invite': return '⭕';
+      case 'circle_post': return '⚡';
       default: return '🔔';
     }
   };
@@ -160,6 +169,8 @@ export default function Notifications() {
       case 'game_invite':
       case 'watch_invite': return 'rgba(139,92,246,0.15)';
       case 'mention': return 'rgba(167,139,250,0.15)';
+      case 'circle_invite':
+      case 'circle_post': return 'rgba(139,92,246,0.15)';
       default: return 'rgba(139,92,246,0.15)';
     }
   };
@@ -178,6 +189,8 @@ export default function Notifications() {
       case 'game_invite': return `invited you to play "${n.groupName || n.roomName}" 🎮`;
       case 'watch_invite': return `invited you to watch "${n.groupName || n.roomName}" 🎬`;
       case 'mention': return `mentioned you in a message`;
+      case 'circle_invite': return `invited you to circle "${n.circleName}" ⭕`;
+      case 'circle_post': return `posted in "${n.circleName}": "${n.postPreview || 'New post'}"`;
       default: return 'interacted with you';
     }
   };
@@ -249,7 +262,8 @@ export default function Notifications() {
                        n.type === 'music_invite' || n.type === 'game_invite' || n.type === 'watch_invite' ? '→ Join room' :
                        n.type === 'follow' ? '→ View profile' :
                        n.type === 'like' || n.type === 'comment' || n.type === 'repost' ? '→ View post' :
-                       n.type === 'story_like' || n.type === 'story_reply' ? '→ View story' : '→ Open'}
+                       n.type === 'story_like' || n.type === 'story_reply' ? '→ View story' :
+                       n.type === 'circle_invite' || n.type === 'circle_post' ? '→ View circle' : '→ Open'}
                     </span>
                   </p>
                 </div>
