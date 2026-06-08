@@ -125,6 +125,12 @@ export default function Profile() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
 
+  const [profileToast, setProfileToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const showProfileToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setProfileToast({ msg, type });
+    setTimeout(() => setProfileToast(null), 3000);
+  };
+
   const { push } = useRouter();
 
   // ── Linked providers ──────────────────────────────────────────────────────
@@ -204,7 +210,8 @@ export default function Profile() {
       await updateDoc(doc(db, 'users', user.uid), { fullName: newFullName, bio: newBio });
       await loadProfile(user.uid);
       setEditing(false);
-    } catch (err: any) { alert('Failed: ' + err.message); }
+      showProfileToast('Profile saved', 'success');
+    } catch (err: any) { showProfileToast('Failed to save: ' + err.message, 'error'); }
     setSaving(false);
   };
 
@@ -212,8 +219,8 @@ export default function Profile() {
   const handleAvatarSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) { alert('Select an image.'); return; }
-    if (file.size > 5 * 1024 * 1024) { alert('Max 5 MB.'); return; }
+    if (!file.type.startsWith('image/')) { showProfileToast('Select an image file', 'error'); return; }
+    if (file.size > 5 * 1024 * 1024) { showProfileToast('Image must be under 5 MB', 'error'); return; }
     uploadAvatar(file); e.target.value = '';
   };
   const uploadAvatar = (file: File) => {
@@ -223,12 +230,13 @@ export default function Profile() {
     const task = uploadBytesResumable(storageRef(storage, path), file);
     task.on('state_changed',
       s => setAvatarProgress(Math.round(s.bytesTransferred / s.totalBytes * 100)),
-      err => { alert('Upload failed: ' + err.message); setAvatarUploading(false); setAvatarProgress(null); },
+      err => { showProfileToast('Upload failed: ' + err.message, 'error'); setAvatarUploading(false); setAvatarProgress(null); },
       async () => {
         const url = await getDownloadURL(task.snapshot.ref);
         await updateDoc(doc(db, 'users', user.uid), { photoURL: url });
         await loadProfile(user.uid);
         setAvatarUploading(false); setAvatarProgress(null);
+        showProfileToast('Photo updated!', 'success');
       }
     );
   };
@@ -241,7 +249,7 @@ export default function Profile() {
       await updateDoc(doc(db, 'users', user.uid), { [field]: value });
       if (field === 'messageSeen') setMessageSeen(value);
       else setActiveStatus(value);
-    } catch (err: any) { alert('Failed: ' + err.message); }
+    } catch (err: any) { showProfileToast('Failed: ' + err.message, 'error'); }
     setTogglingPrivacy(false);
   };
 
@@ -499,8 +507,15 @@ export default function Profile() {
   return (
     <>
       <Navbar />
+      {/* Profile toast */}
+      {profileToast && (
+        <div style={{ position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, padding: '12px 20px', borderRadius: 16, background: profileToast.type === 'success' ? 'rgba(34,197,94,0.15)' : profileToast.type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(139,92,246,0.15)', border: `0.5px solid ${profileToast.type === 'success' ? 'rgba(34,197,94,0.4)' : profileToast.type === 'error' ? 'rgba(239,68,68,0.4)' : 'rgba(139,92,246,0.4)'}`, color: profileToast.type === 'success' ? '#4ade80' : profileToast.type === 'error' ? '#f87171' : '#a78bfa', fontSize: 13, fontWeight: 600, backdropFilter: 'blur(12px)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', fontFamily: 'Inter,sans-serif', animation: 'fadeInDown 0.3s ease' }}>
+          {profileToast.type === 'success' ? '✅' : profileToast.type === 'error' ? '⚠️' : 'ℹ️'} {profileToast.msg}
+        </div>
+      )}
       <style>{`
         @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes fadeInDown{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
         @keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
         @keyframes modalUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
         .toggle-track{transition:background 0.25s}

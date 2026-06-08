@@ -112,12 +112,17 @@ export default function Bookmarks() {
                 return (
                   <div
                     key={post.id}
-                    style={{ padding: '18px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}
+                    onClick={() => router.push(`/post/${post.id}`)}
+                    style={{ padding: '18px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)', cursor: 'pointer', transition: 'background 0.15s' }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'rgba(139,92,246,0.03)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                   >
                     {/* Post header */}
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                      <div style={{ width: 38, height: 38, borderRadius: '50%', background: av.bg, border: `1px solid ${av.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: av.color, flexShrink: 0 }}>
-                        {post.fullName?.[0]?.toUpperCase() || 'U'}
+                      <div style={{ width: 38, height: 38, borderRadius: '50%', overflow: 'hidden', background: av.bg, border: `1px solid ${av.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: av.color, flexShrink: 0 }}>
+                        {post.photoURL
+                          ? <img src={post.photoURL} alt={post.fullName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : post.fullName?.[0]?.toUpperCase() || 'U'}
                       </div>
 
                       <div style={{ flex: 1, minWidth: 0 }}>
@@ -127,9 +132,9 @@ export default function Bookmarks() {
                             <span style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6' }}>{post.fullName}</span>
                             <span style={{ fontSize: 11, color: '#6b7280' }}>@{post.username}</span>
                           </div>
-                          {/* Remove bookmark button */}
+                          {/* Remove bookmark button — stop propagation so click doesn't open post */}
                           <button
-                            onClick={() => removeBookmark(post.id)}
+                            onClick={(e) => { e.stopPropagation(); removeBookmark(post.id); }}
                             title="Remove bookmark"
                             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#60a5fa', padding: '0 2px', lineHeight: 1, transition: 'opacity 0.2s' }}
                             onMouseOver={(e) => (e.currentTarget.style.opacity = '0.6')}

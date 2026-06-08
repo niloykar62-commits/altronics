@@ -68,6 +68,16 @@ function MessagesInner() {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [pendingImageFile, setPendingImageFile] = useState<File | null>(null);
 
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  const [msgToast, setMsgToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const showMsgToast = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setMsgToast({ msg, type });
+    setTimeout(() => setMsgToast(null), 3000);
+  };
+
+  // ── Confirm modal ─────────────────────────────────────────────────────────
+  const [msgConfirm, setMsgConfirm] = useState<{ msg: string; onConfirm: () => void } | null>(null);
+
   // ── Close msg context menu on outside click ───────────────────────────────
   const msgMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -289,45 +299,46 @@ function MessagesInner() {
       await loadGroups(user.uid);
       setEditingGroupName(false);
       setNewGroupName('');
-    } catch (err: any) { alert('Failed: ' + err.message); }
+    } catch (err: any) { showMsgToast('Failed to rename: ' + err.message, 'error'); }
   };
 
   const leaveGroup = async () => {
     if (!groupInfo || !user) return;
-    if (!confirm('Leave this group?')) return;
-    try {
-      const newMembers = (groupInfo.members || []).filter((id: string) => id !== user.uid);
-      const newAdmins = (groupInfo.admins || []).filter((id: string) => id !== user.uid);
-      if (newMembers.length === 0) {
-        await deleteDoc(doc(db, 'groups', groupInfo.id));
-      } else {
-        // If leaving admin was the only admin, promote oldest member
-        const updatedAdmins = newAdmins.length === 0 && groupInfo.createdBy === user.uid
-          ? [newMembers[0]]
-          : newAdmins;
-        await updateDoc(doc(db, 'groups', groupInfo.id), {
-          members: newMembers,
-          admins: updatedAdmins,
-          ...(groupInfo.createdBy === user.uid ? { createdBy: newMembers[0] } : {}),
-        });
-      }
-      setSelectedChat(null);
-      setGroupInfo(null);
-      setShowGroupInfo(false);
-      await loadGroups(user.uid);
-    } catch (err: any) { alert('Failed: ' + err.message); }
+    setMsgConfirm({ msg: 'Leave this group?', onConfirm: async () => {
+      try {
+        const newMembers = (groupInfo.members || []).filter((id: string) => id !== user.uid);
+        const newAdmins = (groupInfo.admins || []).filter((id: string) => id !== user.uid);
+        if (newMembers.length === 0) {
+          await deleteDoc(doc(db, 'groups', groupInfo.id));
+        } else {
+          const updatedAdmins = newAdmins.length === 0 && groupInfo.createdBy === user.uid
+            ? [newMembers[0]]
+            : newAdmins;
+          await updateDoc(doc(db, 'groups', groupInfo.id), {
+            members: newMembers,
+            admins: updatedAdmins,
+            ...(groupInfo.createdBy === user.uid ? { createdBy: newMembers[0] } : {}),
+          });
+        }
+        setSelectedChat(null);
+        setGroupInfo(null);
+        setShowGroupInfo(false);
+        await loadGroups(user.uid);
+      } catch (err: any) { showMsgToast('Failed to leave group', 'error'); }
+    }});
   };
 
   const removeMember = async (memberId: string) => {
     if (!isGroupAdmin() || !groupInfo) return;
-    if (!confirm('Remove this member?')) return;
-    try {
-      const newMembers = (groupInfo.members || []).filter((id: string) => id !== memberId);
-      const newAdmins = (groupInfo.admins || []).filter((id: string) => id !== memberId);
-      await updateDoc(doc(db, 'groups', groupInfo.id), { members: newMembers, admins: newAdmins });
-      await loadGroupInfo(groupInfo.id);
-      setSelectedChat((prev: any) => ({ ...prev, memberCount: newMembers.length }));
-    } catch (err: any) { alert('Failed: ' + err.message); }
+    setMsgConfirm({ msg: 'Remove this member?', onConfirm: async () => {
+      try {
+        const newMembers = (groupInfo.members || []).filter((id: string) => id !== memberId);
+        const newAdmins = (groupInfo.admins || []).filter((id: string) => id !== memberId);
+        await updateDoc(doc(db, 'groups', groupInfo.id), { members: newMembers, admins: newAdmins });
+        await loadGroupInfo(groupInfo.id);
+        setSelectedChat((prev: any) => ({ ...prev, memberCount: newMembers.length }));
+      } catch (err: any) { showMsgToast('Failed to remove member', 'error'); }
+    }});
   };
 
   const toggleAdmin = async (memberId: string) => {
@@ -339,7 +350,7 @@ function MessagesInner() {
     try {
       await updateDoc(doc(db, 'groups', groupInfo.id), { admins: newAdmins });
       await loadGroupInfo(groupInfo.id);
-    } catch (err: any) { alert('Failed: ' + err.message); }
+    } catch (err: any) { showMsgToast('Failed to update admin', 'error'); }
   };
 
   const addMemberToGroup = async (memberId: string) => {
@@ -356,7 +367,8 @@ function MessagesInner() {
       });
       await loadGroupInfo(groupInfo.id);
       setSelectedChat((prev: any) => ({ ...prev, memberCount: newMembers.length }));
-    } catch (err: any) { alert('Failed: ' + err.message); }
+      showMsgToast('Member added', 'success');
+    } catch (err: any) { showMsgToast('Failed to add member', 'error'); }
   };
 
   const loadMessages = async (collectionName: string, chatId: string) => {
@@ -513,8 +525,8 @@ function MessagesInner() {
   }, [inCall, callRoomId]);
 
   const createGroup = async () => {
-    if (!groupName.trim()) { alert('Enter a group name'); return; }
-    if (selectedMembers.length === 0) { alert('Select at least 1 member'); return; }
+    if (!groupName.trim()) { showMsgToast('Enter a group name', 'error'); return; }
+    if (selectedMembers.length === 0) { showMsgToast('Select at least 1 member', 'error'); return; }
     setCreating(true);
     try {
       const members = [user.uid, ...selectedMembers];
@@ -534,8 +546,8 @@ function MessagesInner() {
       }
       setGroupName(''); setSelectedMembers([]); setShowCreateGroup(false);
       await loadGroups(user.uid);
-      alert(`Group "${groupName}" created! 🎉`);
-    } catch (err: any) { alert('Failed: ' + err.message); }
+      showMsgToast(`Group "${groupName}" created! 🎉`, 'success');
+    } catch (err: any) { showMsgToast('Failed: ' + err.message, 'error'); }
     setCreating(false);
   };
 
@@ -658,8 +670,8 @@ function MessagesInner() {
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) { alert('Please select an image file.'); return; }
-    if (file.size > 10 * 1024 * 1024) { alert('Image must be under 10 MB.'); return; }
+    if (!file.type.startsWith('image/')) { showMsgToast('Please select an image file', 'error'); return; }
+    if (file.size > 10 * 1024 * 1024) { showMsgToast('Image must be under 10 MB', 'error'); return; }
     setPendingImageFile(file);
     const reader = new FileReader();
     reader.onload = (ev) => setImagePreview(ev.target?.result as string);
@@ -676,7 +688,7 @@ function MessagesInner() {
 
   const sendImage = async () => {
     if (!pendingImageFile || !user || !selectedChat) return;
-    if (!CLOUD_NAME || !UPLOAD_PRESET) { alert('Cloudinary not configured.'); return; }
+    if (!CLOUD_NAME || !UPLOAD_PRESET) { showMsgToast('Image upload not configured', 'error'); return; }
     const collectionName = selectedChat.type === 'group' ? 'groups' : 'conversations';
     try {
       setImageUploadProgress(10);
@@ -715,7 +727,7 @@ function MessagesInner() {
       if (selectedChat.type === 'dm') await markMessagesAsSeen(collectionName, selectedChat.id);
     } catch (err: any) {
       console.error('Image upload error:', err);
-      alert('Upload failed: ' + err.message);
+      showMsgToast('Upload failed: ' + err.message, 'error');
     }
     setImageUploadProgress(null);
   };
@@ -753,6 +765,26 @@ function MessagesInner() {
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
       <Navbar />
+
+      {/* Toast */}
+      {msgToast && (
+        <div style={{ position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, padding: '12px 20px', borderRadius: 16, background: msgToast.type === 'success' ? 'rgba(34,197,94,0.15)' : msgToast.type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(139,92,246,0.15)', border: `0.5px solid ${msgToast.type === 'success' ? 'rgba(34,197,94,0.4)' : msgToast.type === 'error' ? 'rgba(239,68,68,0.4)' : 'rgba(139,92,246,0.4)'}`, color: msgToast.type === 'success' ? '#4ade80' : msgToast.type === 'error' ? '#f87171' : '#a78bfa', fontSize: 13, fontWeight: 600, backdropFilter: 'blur(12px)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', fontFamily: 'Inter,sans-serif' }}>
+          {msgToast.type === 'success' ? '✅' : msgToast.type === 'error' ? '⚠️' : 'ℹ️'} {msgToast.msg}
+        </div>
+      )}
+
+      {/* Confirm Modal */}
+      {msgConfirm && (
+        <div onClick={() => setMsgConfirm(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#111118', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: 20, padding: '24px 20px', maxWidth: 320, width: '100%', fontFamily: 'Inter,sans-serif' }}>
+            <p style={{ color: '#f3f4f6', fontSize: 15, fontWeight: 600, marginBottom: 20, textAlign: 'center', lineHeight: 1.5 }}>{msgConfirm.msg}</p>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setMsgConfirm(null)} style={{ flex: 1, padding: '10px', borderRadius: 12, background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Cancel</button>
+              <button onClick={() => { msgConfirm.onConfirm(); setMsgConfirm(null); }} style={{ flex: 1, padding: '10px', borderRadius: 12, background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.4)', color: '#f87171', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Confirm</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Create Group Modal */}
       {showCreateGroup && (

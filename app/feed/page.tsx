@@ -14,6 +14,50 @@ const PAGE_SIZE = 20;
 
 const inputStyle = { width: '100%', padding: '12px 16px', background: 'rgba(139,92,246,0.08)', border: '0.5px solid rgba(139,92,246,0.2)', borderRadius: 12, color: '#f3f4f6', fontSize: 14, fontFamily: 'Inter,sans-serif', outline: 'none' };
 
+// Reusable inline toast hook
+function useToast() {
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const show = (msg: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+  return { toast, show };
+}
+
+// Inline confirm dialog state type
+interface ConfirmState { msg: string; onConfirm: () => void; }
+
+// Toast UI component
+function Toast({ toast }: { toast: { msg: string; type: string } | null }) {
+  if (!toast) return null;
+  const bg = toast.type === 'success' ? 'rgba(34,197,94,0.15)' : toast.type === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(139,92,246,0.15)';
+  const border = toast.type === 'success' ? 'rgba(34,197,94,0.4)' : toast.type === 'error' ? 'rgba(239,68,68,0.4)' : 'rgba(139,92,246,0.4)';
+  const color = toast.type === 'success' ? '#4ade80' : toast.type === 'error' ? '#f87171' : '#a78bfa';
+  const icon = toast.type === 'success' ? '✅' : toast.type === 'error' ? '⚠️' : 'ℹ️';
+  return (
+    <div style={{ position: 'fixed', top: 72, left: '50%', transform: 'translateX(-50%)', zIndex: 9999, padding: '12px 20px', borderRadius: 16, background: bg, border: `0.5px solid ${border}`, color, fontSize: 13, fontWeight: 600, backdropFilter: 'blur(12px)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', whiteSpace: 'nowrap', fontFamily: 'Inter,sans-serif', animation: 'fadeInDown 0.3s ease' }}>
+      {icon} {toast.msg}
+      <style>{`@keyframes fadeInDown{from{opacity:0;transform:translateX(-50%) translateY(-8px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}`}</style>
+    </div>
+  );
+}
+
+// Inline confirm modal
+function ConfirmModal({ state, onCancel }: { state: ConfirmState | null; onCancel: () => void }) {
+  if (!state) return null;
+  return (
+    <div onClick={onCancel} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#111118', border: '0.5px solid rgba(139,92,246,0.3)', borderRadius: 20, padding: '24px 20px', maxWidth: 320, width: '100%', fontFamily: 'Inter,sans-serif' }}>
+        <p style={{ color: '#f3f4f6', fontSize: 15, fontWeight: 600, marginBottom: 20, textAlign: 'center', lineHeight: 1.5 }}>{state.msg}</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onCancel} style={{ flex: 1, padding: '10px', borderRadius: 12, background: 'rgba(255,255,255,0.05)', border: '0.5px solid rgba(255,255,255,0.1)', color: '#9ca3af', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Cancel</button>
+          <button onClick={() => { state.onConfirm(); onCancel(); }} style={{ flex: 1, padding: '10px', borderRadius: 12, background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.4)', color: '#f87171', fontSize: 14, fontWeight: 700, cursor: 'pointer', fontFamily: 'Inter,sans-serif' }}>Confirm</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function postScore(p: any): number {
   const likes = p.likes?.length || 0;
   const reposts = p.reposts?.length || 0;
@@ -56,6 +100,10 @@ export default function Feed() {
   const [loadingMore, setLoadingMore] = useState(false);
   const lastDocRef = useRef<any>(null);
   const { push } = useRouter();
+
+  const { toast, show: showToast } = useToast();
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const showConfirm = (msg: string, onConfirm: () => void) => setConfirmState({ msg, onConfirm });
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -132,7 +180,7 @@ export default function Feed() {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { alert('Image must be under 5MB'); return; }
+    if (file.size > 5 * 1024 * 1024) { showToast('Image must be under 5MB', 'error'); return; }
     setImage(file); setImagePreview(URL.createObjectURL(file));
   };
 
@@ -172,15 +220,16 @@ export default function Feed() {
       await loadPosts(true);
     } catch (err: any) {
       console.error('Post error:', err);
-      alert('Failed to post: ' + err.message);
+      showToast('Failed to post: ' + err.message, 'error');
     }
     setLoading(false);
   };
 
   const deletePost = async (postId: string) => {
-    if (!confirm('Delete this post?')) return;
-    try { await deleteDoc(doc(db, 'posts', postId)); await loadPosts(true); }
-    catch (err) { console.error(err); }
+    showConfirm('Delete this post?', async () => {
+      try { await deleteDoc(doc(db, 'posts', postId)); await loadPosts(true); showToast('Post deleted', 'success'); }
+      catch (err) { console.error(err); showToast('Failed to delete post', 'error'); }
+    });
   };
 
   const saveEdit = async (postId: string) => {
@@ -225,22 +274,24 @@ export default function Feed() {
   };
 
   const repost = async (post: any) => {
-    if (!user || post.reposts?.includes(user.uid)) { alert('Already reposted!'); return; }
-    if (!confirm(`Repost @${post.username}'s post?`)) return;
-    setRepostingId(post.id);
-    try {
-      await addDoc(collection(db, 'posts'), {
-        userId: user.uid, username: userProfile?.username || 'anonymous',
-        fullName: userProfile?.fullName || 'User', content: post.content,
-        imageUrl: post.imageUrl ?? null, createdAt: serverTimestamp(),
-        likes: [], reposts: [], isRepost: true,
-        originalAuthor: post.fullName, originalUsername: post.username,
-      });
-      await updateDoc(doc(db, 'posts', post.id), { reposts: arrayUnion(user.uid) });
-      await sendNotification(post.userId, 'repost', { postId: post.id });
-      await loadPosts(true);
-    } catch (err) { console.error(err); }
-    setRepostingId(null);
+    if (!user || post.reposts?.includes(user.uid)) { showToast('Already reposted!', 'info'); return; }
+    showConfirm(`Repost @${post.username}'s post?`, async () => {
+      setRepostingId(post.id);
+      try {
+        await addDoc(collection(db, 'posts'), {
+          userId: user.uid, username: userProfile?.username || 'anonymous',
+          fullName: userProfile?.fullName || 'User', content: post.content,
+          imageUrl: post.imageUrl ?? null, createdAt: serverTimestamp(),
+          likes: [], reposts: [], isRepost: true,
+          originalAuthor: post.fullName, originalUsername: post.username,
+        });
+        await updateDoc(doc(db, 'posts', post.id), { reposts: arrayUnion(user.uid) });
+        await sendNotification(post.userId, 'repost', { postId: post.id });
+        await loadPosts(true);
+        showToast('Reposted!', 'success');
+      } catch (err) { console.error(err); showToast('Failed to repost', 'error'); }
+      setRepostingId(null);
+    });
   };
 
   const loadComments = async (postId: string) => {
@@ -297,6 +348,8 @@ export default function Feed() {
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0f', fontFamily: 'Inter,sans-serif' }}>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <Toast toast={toast} />
+      <ConfirmModal state={confirmState} onCancel={() => setConfirmState(null)} />
       <Navbar />
       <div style={{ maxWidth: 600, margin: '0 auto', paddingBottom: 100 }}>
 

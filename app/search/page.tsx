@@ -400,10 +400,16 @@ export default function Search() {
                     filteredPosts.map((post: any, idx) => {
                       const av = avatarColors[idx % 3];
                       return (
-                        <div key={post.id} style={{ padding: '16px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)' }}>
+                        <div key={post.id}
+                          onClick={() => push(`/post/${post.id}`)}
+                          style={{ padding: '16px 0', borderBottom: '0.5px solid rgba(255,255,255,0.04)', cursor: 'pointer', transition: 'background 0.15s' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(139,92,246,0.03)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                           <div style={{ display: 'flex', gap: 10 }}>
-                            <div style={{ width: 36, height: 36, borderRadius: '50%', background: av.bg, border: `1px solid ${av.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: av.color, flexShrink: 0 }}>
-                              {post.fullName?.[0]?.toUpperCase() || 'U'}
+                            <div style={{ width: 36, height: 36, borderRadius: '50%', overflow: 'hidden', background: av.bg, border: `1px solid ${av.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: av.color, flexShrink: 0 }}>
+                              {post.photoURL
+                                ? <img src={post.photoURL} alt={post.fullName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                : post.fullName?.[0]?.toUpperCase() || 'U'}
                             </div>
                             <div style={{ flex: 1 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>

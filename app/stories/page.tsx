@@ -120,7 +120,7 @@ function StoriesInner() {
 
   const uploadStory = async (file: File) => {
     if (!user) return;
-    if (file.size > 10 * 1024 * 1024) { alert('File must be under 10MB'); return; }
+    if (file.size > 10 * 1024 * 1024) { showToast('File must be under 10MB', 'error'); return; }
     setUploading(true);
     try {
       const formData = new FormData();
@@ -311,8 +311,19 @@ function StoriesInner() {
                   <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', margin: 0 }}>@{selectedGroup.username}</p>
                 </div>
               </div>
-              <button onClick={() => setSelectedGroup(null)}
-                style={{ background: 'none', border: 'none', color: 'white', fontSize: 24, cursor: 'pointer', padding: 4 }}>✕</button>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                {/* Delete button — only for the story owner */}
+                {currentStory?.userId === user?.uid && (
+                  <button
+                    onClick={() => { deleteStory(currentStory.id); setSelectedGroup(null); }}
+                    title="Delete this story"
+                    style={{ background: 'rgba(239,68,68,0.15)', border: '0.5px solid rgba(239,68,68,0.4)', color: '#f87171', fontSize: 14, width: 34, height: 34, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    🗑
+                  </button>
+                )}
+                <button onClick={() => setSelectedGroup(null)}
+                  style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: 'white', fontSize: 18, width: 34, height: 34, borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+              </div>
             </div>
 
             {/* Story image */}
