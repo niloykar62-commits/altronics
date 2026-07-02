@@ -131,52 +131,37 @@ export default function Signup() {
     const cleanEmail = sanitize(email).toLowerCase();
 
     try {
-      // ── Check username uniqueness ──────────────────────────────────────────
-      const usnQuery = query(collection(db, 'users'), where('username', '==', cleanUser));
-      const usnSnap  = await getDocs(usnQuery);
-      if (!usnSnap.empty) {
-        setFieldErrors((p) => ({ ...p, username: 'Username already taken.' }));
+      // ── Call server-side API with validation ───────────────────────────────
+      recordAttempt();
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fullName: cleanName,
+          username: cleanUser,
+          email: cleanEmail,
+          password: password,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to create account');
         setLoading(false);
         return;
       }
 
-      // ── Create auth user ───────────────────────────────────────────────────
-      recordAttempt();
+      // ── After successful server-side creation, sign in with Firebase ────────
       const { user } = await createUserWithEmailAndPassword(auth, cleanEmail, password);
       await updateProfile(user, { displayName: cleanName });
-
-      // ── Create Firestore user doc ──────────────────────────────────────────
-      await setDoc(doc(db, 'users', user.uid), {
-        uid:        user.uid,
-        fullName:   cleanName,
-        username:   cleanUser,
-        email:      cleanEmail,
-        createdAt:  serverTimestamp(),
-        following:  [],
-        followers:  [],
-        activeStatus:   true,
-        messageSeen:    true,
-        photoURL:       null,
-        bio:            '',
-        isVerified:     false,
-        role:           'user',
-      });
 
       clearAttempts();
       push('/feed');
     } catch (err: any) {
       recordAttempt();
-      if (err.code === 'auth/email-already-in-use')
-        setError('An account with this email already exists.');
-      else if (err.code === 'auth/invalid-email')
-        setError('Invalid email address format.');
-      else if (err.code === 'auth/weak-password')
-        setError('Password is too weak. Please choose a stronger one.');
-      else {
-        // Don't expose raw Firebase error messages to users
-        console.error('Signup error:', err);
-        setError('Something went wrong. Please try again.');
-      }
+      console.error('Signup error:', err);
+      setError('Something went wrong. Please try again.');
     }
     setLoading(false);
   };

@@ -207,7 +207,30 @@ export default function Profile() {
     if (!user) return;
     setSaving(true);
     try {
-      await updateDoc(doc(db, 'users', user.uid), { fullName: newFullName, bio: newBio });
+      // ── Get Firebase ID token for authentication ───────────────────────────
+      const token = await user.getIdToken();
+
+      // ── Call server-side API with validation and sanitization ───────────────
+      const res = await fetch('/api/auth/profile', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          fullName: newFullName,
+          bio: newBio,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        showProfileToast(data.error || 'Failed to save profile', 'error');
+        setSaving(false);
+        return;
+      }
+
       await loadProfile(user.uid);
       setEditing(false);
       showProfileToast('Profile saved', 'success');

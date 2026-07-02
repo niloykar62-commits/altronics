@@ -42,7 +42,24 @@ export default function Login() {
   const handleLogin = async () => {
     if (!email || !password) { setError('Please fill in all fields.'); return; }
     setLoading(true); setError('');
+
     try {
+      // ── Call server-side API with validation ───────────────────────────────
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Invalid credentials');
+        setLoading(false);
+        return;
+      }
+
+      // ── After successful validation, sign in with Firebase ───────────────────
       await signInWithEmailAndPassword(auth, email, password);
       router.push('/feed');
     } catch (err: any) {
@@ -57,12 +74,24 @@ export default function Login() {
     if (!recoverEmail.trim()) { setRecoverError('Enter your email address.'); return; }
     setRecoverLoading(true); setRecoverError('');
     try {
-      await sendPasswordResetEmail(auth, recoverEmail.trim());
+      // ── Call server-side API with validation ───────────────────────────────
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: recoverEmail.trim() }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setRecoverError(data.error || 'Failed to send reset email');
+        setRecoverLoading(false);
+        return;
+      }
+
       setScreen('recover-email-sent');
     } catch (err: any) {
-      if (err.code === 'auth/user-not-found') setRecoverError('No account found with this email.');
-      else if (err.code === 'auth/invalid-email') setRecoverError('Please enter a valid email address.');
-      else setRecoverError(err.message);
+      setRecoverError('Something went wrong. Please try again.');
     }
     setRecoverLoading(false);
   };
