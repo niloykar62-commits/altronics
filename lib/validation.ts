@@ -26,26 +26,21 @@ export const emailSchema = z
   );
 
 // ── Password validation ───────────────────────────────────────────────────────────
-// Enforces: min 8 chars, max 72 chars (bcrypt limit), uppercase, lowercase, number, special char
+// Enforces: min 8 chars, max 72 chars (bcrypt limit), at least 3 of: uppercase, lowercase, number, special char
 export const passwordSchema = z
   .string()
   .min(8, 'Password must be at least 8 characters')
   .max(72, 'Password is too long (max 72 characters)')
   .refine(
-    (val) => /[A-Z]/.test(val),
-    'Password must contain at least one uppercase letter'
-  )
-  .refine(
-    (val) => /[a-z]/.test(val),
-    'Password must contain at least one lowercase letter'
-  )
-  .refine(
-    (val) => /[0-9]/.test(val),
-    'Password must contain at least one number'
-  )
-  .refine(
-    (val) => /[^A-Za-z0-9]/.test(val),
-    'Password must contain at least one special character'
+    (val) => {
+      const hasUpper = /[A-Z]/.test(val);
+      const hasLower = /[a-z]/.test(val);
+      const hasNumber = /[0-9]/.test(val);
+      const hasSpecial = /[^A-Za-z0-9]/.test(val);
+      const complexityCount = [hasUpper, hasLower, hasNumber, hasSpecial].filter(Boolean).length;
+      return complexityCount >= 3;
+    },
+    'Password must contain at least 3 of: uppercase, lowercase, number, or special character'
   );
 
 // ── Username validation ───────────────────────────────────────────────────────────
@@ -185,9 +180,10 @@ export function validateRequest<T>(
   } catch (error) {
     if (error instanceof z.ZodError) {
       // Log the actual error for debugging
-      console.error('[Validation Error]', error.errors);
-      // Return generic error to prevent account enumeration
-      return { success: false, error: 'Invalid input. Please check your data and try again.' };
+      console.error('[Validation Error]', error.issues);
+      // Return the first specific error message to help the user
+      const firstError = error.issues[0]?.message || 'Invalid input. Please check your data and try again.';
+      return { success: false, error: firstError };
     }
     return { success: false, error: 'Invalid request' };
   }
