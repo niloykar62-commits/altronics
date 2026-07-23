@@ -26,10 +26,14 @@ function getAdminApp() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    console.log('[Signup API] Received body:', body);
 
     // ── Server-side validation ───────────────────────────────────────────────
     const validation = validateRequest(signupSchema, body);
+    console.log('[Signup API] Validation result:', validation);
+    
     if (!validation.success) {
+      console.error('[Signup API] Validation failed:', validation.error);
       return NextResponse.json(
         { error: validation.error },
         { status: 400 }
@@ -37,6 +41,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { fullName, username, email, password } = validation.data;
+    console.log('[Signup API] Validated data:', { fullName, username, email });
 
     // ── Initialize Firebase Admin ───────────────────────────────────────────
     const app = getAdminApp();

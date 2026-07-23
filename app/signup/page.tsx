@@ -130,6 +130,8 @@ export default function Signup() {
     const cleanUser = sanitize(username).toLowerCase().replace(/\s/g, '');
     const cleanEmail = sanitize(email).toLowerCase();
 
+    console.log('[Signup Client] Sending data:', { fullName: cleanName, username: cleanUser, email: cleanEmail });
+
     try {
       // ── Call server-side API with validation ───────────────────────────────
       recordAttempt();
@@ -145,6 +147,7 @@ export default function Signup() {
       });
 
       const data = await res.json();
+      console.log('[Signup Client] Response:', { status: res.status, data });
 
       if (!res.ok) {
         setError(data.error || 'Failed to create account');
