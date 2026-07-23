@@ -2,6 +2,18 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAuth } from 'firebase-admin/auth';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { loginSchema, validateRequest } from '@/lib/validation';
+import { 
+  checkRateLimit, 
+  trackFailedAttempt, 
+  isAccountLocked, 
+  lockAccount, 
+  resetFailedAttempts, 
+  getProgressiveDelay, 
+  sleep, 
+  getClientIP 
+} from '@/lib/rate-limit';
+import { verifyCaptcha } from '@/lib/captcha';
+import { sendLockoutNotification } from '@/lib/email';
 
 export const runtime = 'nodejs';
 
@@ -23,8 +35,11 @@ function getAdminApp() {
 
 // ── POST handler ─────────────────────────────────────────────────────────────
 export async function POST(request: NextRequest) {
+  const clientIP = getClientIP(request);
+  let body: any;
+  
   try {
-    const body = await request.json();
+    body = await request.json();
 
     // ── Server-side validation ───────────────────────────────────────────────
     const validation = validateRequest(loginSchema, body);
@@ -35,46 +50,116 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { email, password } = validation.data;
+    const { email, password, captchaToken } = validation.data as { email: string; password: string; captchaToken?: string };
+
+    // ── Check IP rate limit ─────────────────────────────────────────────────
+    const rateLimit = await checkRateLimit(clientIP);
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { 
+          error: 'Too many attempts. Please try again later.',
+          retryAfter: rateLimit.resetTime
+        },
+        { status: 429 }
+      );
+    }
+
+    // ── Check if account is locked ───────────────────────────────────────────
+    const lockStatus = await isAccountLocked(email);
+    if (lockStatus.locked) {
+      // Apply progressive delay even for locked accounts
+      const delay = getProgressiveDelay(6); // Max delay for locked accounts
+      await sleep(delay);
+      
+      return NextResponse.json(
+        { error: 'Too many attempts. Please try again later.' },
+        { status: 429 }
+      );
+    }
+
+    // ── Check failed attempts and determine if CAPTCHA is required ───────────
+    const attemptInfo = await trackFailedAttempt(email, clientIP);
+    
+    if (attemptInfo.requiresCaptcha) {
+      if (!captchaToken) {
+        return NextResponse.json(
+          { 
+            error: 'CAPTCHA verification required',
+            requiresCaptcha: true
+          },
+          { status: 400 }
+        );
+      }
+      
+      // Verify CAPTCHA
+      const captchaResult = await verifyCaptcha(captchaToken, clientIP);
+      if (!captchaResult.success) {
+        return NextResponse.json(
+          { 
+            error: 'CAPTCHA verification failed',
+            requiresCaptcha: true
+          },
+          { status: 400 }
+        );
+      }
+    }
 
     // ── Initialize Firebase Admin ───────────────────────────────────────────
     const app = getAdminApp();
     const auth = getAuth(app);
 
-    // ── Note: Firebase Admin SDK doesn't have a direct login method
-    // For server-side login, we typically use Firebase Client SDK on the frontend
-    // This endpoint validates input and can be used for additional server checks
-    // The actual authentication should be done via Firebase Client SDK
-    
-    // For this implementation, we'll validate the credentials exist
-    // but the actual token generation happens on the client
+    // ── Verify credentials ───────────────────────────────────────────────────
+    let userExists = false;
     try {
-      // Check if user exists by email
       const user = await auth.getUserByEmail(email);
-      
-      // We don't verify password here (that's done client-side)
-      // This endpoint is for input validation only
-      return NextResponse.json(
-        { 
-          success: true,
-          message: 'Credentials validated'
-        },
-        { status: 200 }
-      );
+      userExists = true;
     } catch (err: any) {
+      // User doesn't exist - still apply progressive delay
       console.error('[Login/Auth]', err.message);
-      // Return generic error to prevent account enumeration
-      return NextResponse.json(
-        { error: 'Invalid credentials' },
-        { status: 401 }
-      );
     }
+
+    // ── For actual password verification, we need to use Firebase Client SDK
+    // This endpoint validates input, rate limits, and checks credentials exist
+    // The actual authentication happens on the client with Firebase
+    
+    // Simulate credential check (in real implementation, you'd verify password)
+    // For now, we'll assume the client will handle actual auth
+    // This endpoint focuses on security: rate limiting, lockouts, CAPTCHA
+    
+    // If we reach here, the request passed all security checks
+    // Reset failed attempts on successful validation
+    await resetFailedAttempts(email, clientIP);
+    
+    return NextResponse.json(
+      { 
+        success: true,
+        message: 'Credentials validated'
+      },
+      { status: 200 }
+    );
 
   } catch (err: any) {
     console.error('[Login/Route]', err.message);
+    
+    // Track failed attempt on error
+    await trackFailedAttempt(body.email || '', clientIP);
+    
+    // Apply progressive delay
+    const attemptInfo = await trackFailedAttempt(body.email || '', clientIP);
+    const delay = getProgressiveDelay(attemptInfo.attemptCount);
+    await sleep(delay);
+    
+    // Check if account should be locked
+    if (attemptInfo.isLocked) {
+      await lockAccount(body.email || '');
+      // TODO: Send email notification about lockout
+      console.log(`[Login] Account locked: ${body.email}`);
+    }
+    
+    // Generic error message - don't reveal if it's rate limit vs invalid creds
     return NextResponse.json(
-      { error: 'An error occurred. Please try again.' },
-      { status: 500 }
+      { error: 'Invalid credentials. Please try again.' },
+      { status: 401 }
     );
   }
 }

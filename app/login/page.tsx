@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth } from '@/lib/firebase';
 import {
@@ -20,6 +20,11 @@ export default function Login() {
   const [error, setError] = useState('');
   const router = useRouter();
 
+  // ── CAPTCHA state ─────────────────────────────────────────────────────────
+  const [captchaToken, setCaptchaToken] = useState('');
+  const [requiresCaptcha, setRequiresCaptcha] = useState(false);
+  const [captchaLoaded, setCaptchaLoaded] = useState(false);
+
   // ── Recovery state ────────────────────────────────────────────────────────
   const [screen, setScreen] = useState<Screen>('login');
   const [recoverEmail, setRecoverEmail] = useState('');
@@ -38,9 +43,34 @@ export default function Login() {
     setConfirmationResult(null);
   };
 
+  // ── Load Cloudflare Turnstile script ───────────────────────────────────────
+  useEffect(() => {
+    if (requiresCaptcha && !captchaLoaded) {
+      const script = document.createElement('script');
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
+      script.async = true;
+      script.defer = true;
+      script.onload = () => setCaptchaLoaded(true);
+      document.head.appendChild(script);
+      return () => {
+        document.head.removeChild(script);
+      };
+    }
+  }, [requiresCaptcha, captchaLoaded]);
+
+  // ── CAPTCHA callback ───────────────────────────────────────────────────────
+  const onCaptchaSuccess = (token: string) => {
+    setCaptchaToken(token);
+  };
+
   // ── Login ─────────────────────────────────────────────────────────────────
   const handleLogin = async () => {
     if (!email || !password) { setError('Please fill in all fields.'); return; }
+    
+    // Get CAPTCHA token from window object if required
+    const token = requiresCaptcha ? (window as any).captchaToken : captchaToken;
+    if (requiresCaptcha && !token) { setError('Please complete the CAPTCHA.'); return; }
+    
     setLoading(true); setError('');
 
     try {
@@ -48,13 +78,29 @@ export default function Login() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ 
+          email, 
+          password,
+          captchaToken: requiresCaptcha ? token : undefined,
+        }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || 'Invalid credentials');
+        // Handle rate limit (429)
+        if (res.status === 429) {
+          setError('Too many attempts. Please try again later.');
+        }
+        // Handle CAPTCHA requirement
+        else if (data.requiresCaptcha) {
+          setRequiresCaptcha(true);
+          setError('Please complete the CAPTCHA to continue.');
+        }
+        // Generic error
+        else {
+          setError(data.error || 'Invalid credentials');
+        }
         setLoading(false);
         return;
       }
@@ -217,6 +263,26 @@ export default function Login() {
               onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
               placeholder="••••••••" style={inputStyle} />
           </div>
+
+          {/* CAPTCHA widget */}
+          {requiresCaptcha && (
+            <div style={{ marginBottom: 16 }}>
+              <div 
+                className="cf-turnstile"
+                data-sitekey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || ''}
+                data-callback="onCaptchaSuccess"
+                data-theme="dark"
+              />
+              <script dangerouslySetInnerHTML={{
+                __html: `
+                  window.onCaptchaSuccess = function(token) {
+                    // This will be called by Turnstile
+                    window.captchaToken = token;
+                  };
+                `
+              }} />
+            </div>
+          )}
 
           {/* Forgot password link */}
           <div style={{ textAlign: 'right', marginBottom: 20 }}>

@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { auth, db } from '@/lib/firebase';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { createUserWithEmailAndPassword, updateProfile, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp, collection, query, where, getDocs } from 'firebase/firestore';
 import Link from 'next/link';
 
@@ -153,7 +153,8 @@ export default function Signup() {
       }
 
       // ── After successful server-side creation, sign in with Firebase ────────
-      const { user } = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+      // The server already created the user, so we just sign in
+      const { user } = await signInWithEmailAndPassword(auth, cleanEmail, password);
       await updateProfile(user, { displayName: cleanName });
 
       clearAttempts();
@@ -161,7 +162,13 @@ export default function Signup() {
     } catch (err: any) {
       recordAttempt();
       console.error('Signup error:', err);
-      setError('Something went wrong. Please try again.');
+      if (err.code === 'auth/email-already-in-use') {
+        setError('An account with this email already exists.');
+      } else if (err.code === 'auth/invalid-credential') {
+        setError('Invalid credentials. Please try again.');
+      } else {
+        setError('Something went wrong. Please try again.');
+      }
     }
     setLoading(false);
   };

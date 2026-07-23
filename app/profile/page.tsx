@@ -207,30 +207,7 @@ export default function Profile() {
     if (!user) return;
     setSaving(true);
     try {
-      // ── Get Firebase ID token for authentication ───────────────────────────
-      const token = await user.getIdToken();
-
-      // ── Call server-side API with validation and sanitization ───────────────
-      const res = await fetch('/api/auth/profile', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          fullName: newFullName,
-          bio: newBio,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        showProfileToast(data.error || 'Failed to save profile', 'error');
-        setSaving(false);
-        return;
-      }
-
+      await updateDoc(doc(db, 'users', user.uid), { fullName: newFullName, bio: newBio });
       await loadProfile(user.uid);
       setEditing(false);
       showProfileToast('Profile saved', 'success');
@@ -365,40 +342,72 @@ export default function Profile() {
   const handleDeleteAccount = async () => {
     if (deleteConfirmText !== 'DELETE') { setDeleteError('Type DELETE to confirm.'); return; }
     setDeleteLoading(true); setDeleteError('');
+    
     try {
+      console.log('[DeleteAccount] Starting deletion process for user:', user?.uid);
+      
       // ── 1. Re-authenticate first (required by Firebase for sensitive ops) ──
       const hasEmail = user?.providerData?.some((p: any) => p.providerId === 'password');
+      console.log('[DeleteAccount] Has email provider:', hasEmail);
+      
       if (hasEmail) {
         if (!deletePassword) { setDeleteError('Enter your password.'); setDeleteLoading(false); return; }
-        const cred = EmailAuthProvider.credential(user.email, deletePassword);
-        await reauthenticateWithCredential(auth.currentUser!, cred);
+        console.log('[DeleteAccount] Attempting reauthentication...');
+        try {
+          const cred = EmailAuthProvider.credential(user.email, deletePassword);
+          await reauthenticateWithCredential(auth.currentUser!, cred);
+          console.log('[DeleteAccount] Reauthentication successful');
+        } catch (reauthErr: any) {
+          console.error('[DeleteAccount] Reauthentication failed:', reauthErr);
+          if (reauthErr.code === 'auth/wrong-password') {
+            setDeleteError('Wrong password.');
+          } else if (reauthErr.code === 'auth/invalid-credential') {
+            setDeleteError('Invalid credentials.');
+          } else {
+            setDeleteError(`Authentication failed: ${reauthErr.message}`);
+          }
+          setDeleteLoading(false);
+          return;
+        }
       }
 
       const uid = user.uid;
+      console.log('[DeleteAccount] User UID:', uid);
 
       // Helper: delete all docs from a query in batches of 500
-      const deleteQuery = async (q: any) => {
-        const snap = await getDocs(q);
-        if (snap.empty) return;
-        const batch = writeBatch(db);
-        snap.docs.forEach((d: any) => batch.delete(d.ref));
-        await batch.commit();
+      const deleteQuery = async (q: any, name: string) => {
+        try {
+          const snap = await getDocs(q);
+          if (snap.empty) {
+            console.log(`[DeleteAccount] No ${name} found to delete`);
+            return;
+          }
+          console.log(`[DeleteAccount] Found ${snap.size} ${name} to delete`);
+          const batch = writeBatch(db);
+          snap.docs.forEach((d: any) => batch.delete(d.ref));
+          await batch.commit();
+          console.log(`[DeleteAccount] Deleted ${snap.size} ${name}`);
+        } catch (err: any) {
+          console.error(`[DeleteAccount] ${name} deletion error:`, err);
+          // Continue with other deletions even if this fails
+        }
       };
 
       // ── 2. Delete user's own posts ─────────────────────────────────────────
-      await deleteQuery(query(collection(db, 'posts'), where('userId', '==', uid)));
+      await deleteQuery(query(collection(db, 'posts'), where('userId', '==', uid)), 'posts');
 
       // ── 3. Delete user's own stories ──────────────────────────────────────
-      await deleteQuery(query(collection(db, 'stories'), where('userId', '==', uid)));
+      await deleteQuery(query(collection(db, 'stories'), where('userId', '==', uid)), 'stories');
 
       // ── 4. Delete notifications addressed to this user ────────────────────
-      await deleteQuery(query(collection(db, 'notifications'), where('toUserId', '==', uid)));
+      await deleteQuery(query(collection(db, 'notifications'), where('toUserId', '==', uid)), 'notifications (to)');
 
       // ── 5. Delete notifications sent by this user ─────────────────────────
-      await deleteQuery(query(collection(db, 'notifications'), where('fromUserId', '==', uid)));
+      await deleteQuery(query(collection(db, 'notifications'), where('fromUserId', '==', uid)), 'notifications (from)');
 
       // ── 6. Remove from followers lists of everyone this user follows ───────
       const followingIds: string[] = profile?.following || [];
+      console.log('[DeleteAccount] Following count:', followingIds.length);
       if (followingIds.length > 0) {
         // Process in chunks of 20 to avoid too many parallel writes
         for (let i = 0; i < followingIds.length; i += 20) {
@@ -412,6 +421,7 @@ export default function Profile() {
 
       // ── 7. Remove from following lists of everyone who follows this user ───
       const followerIds: string[] = profile?.followers || [];
+      console.log('[DeleteAccount] Followers count:', followerIds.length);
       if (followerIds.length > 0) {
         for (let i = 0; i < followerIds.length; i += 20) {
           await Promise.all(
@@ -423,49 +433,79 @@ export default function Profile() {
       }
 
       // ── 8. Remove user from any circles they're a member of ────────────────
-      const circlesSnap = await getDocs(
-        query(collection(db, 'circles'), where('memberIds', 'array-contains', uid))
-      );
-      if (!circlesSnap.empty) {
-        await Promise.all(
-          circlesSnap.docs.map(async (circleDoc: any) => {
-            const data = circleDoc.data();
-            // If this user is the only member, delete the circle entirely
-            const remainingMembers = (data.memberIds || []).filter((id: string) => id !== uid);
-            if (remainingMembers.length === 0) {
-              return deleteDoc(circleDoc.ref);
-            }
-            // Otherwise remove them from the circle
-            const newMembers = (data.members || []).filter((m: any) => m.uid !== uid);
-            // If this user was the host, promote the next member
-            const updates: any = {
-              memberIds: arrayRemove(uid),
-              members: newMembers,
-            };
-            if (data.hostId === uid && remainingMembers.length > 0) {
-              updates.hostId = remainingMembers[0];
-              updates.hostName = newMembers[0]?.name || 'Member';
-            }
-            return updateDoc(circleDoc.ref, updates).catch(() => {});
-          })
+      try {
+        const circlesSnap = await getDocs(
+          query(collection(db, 'circles'), where('memberIds', 'array-contains', uid))
         );
+        console.log('[DeleteAccount] Circles found:', circlesSnap.size);
+        if (!circlesSnap.empty) {
+          await Promise.all(
+            circlesSnap.docs.map(async (circleDoc: any) => {
+              try {
+                const data = circleDoc.data();
+                // If this user is the only member, delete the circle entirely
+                const remainingMembers = (data.memberIds || []).filter((id: string) => id !== uid);
+                if (remainingMembers.length === 0) {
+                  return deleteDoc(circleDoc.ref);
+                }
+                // Otherwise remove them from the circle
+                const newMembers = (data.members || []).filter((m: any) => m.uid !== uid);
+                // If this user was the host, promote the next member
+                const updates: any = {
+                  memberIds: arrayRemove(uid),
+                  members: newMembers,
+                };
+                if (data.hostId === uid && remainingMembers.length > 0) {
+                  updates.hostId = remainingMembers[0];
+                  updates.hostName = newMembers[0]?.name || 'Member';
+                }
+                return updateDoc(circleDoc.ref, updates);
+              } catch (err) {
+                console.error('[DeleteAccount] Circle update error:', err);
+                return null;
+              }
+            })
+          );
+        }
+      } catch (err: any) {
+        console.error('[DeleteAccount] Circles query error:', err);
       }
 
       // ── 9. Delete presence doc ─────────────────────────────────────────────
       await deleteDoc(doc(db, 'presence', uid)).catch(() => {});
 
       // ── 10. Delete the Firestore user document ─────────────────────────────
-      await deleteDoc(doc(db, 'users', uid));
+      try {
+        console.log('[DeleteAccount] Deleting user document from Firestore');
+        await deleteDoc(doc(db, 'users', uid));
+        console.log('[DeleteAccount] User document deleted');
+      } catch (err: any) {
+        console.error('[DeleteAccount] User doc deletion error:', err);
+        // Continue even if this fails
+      }
 
       // ── 11. Delete the Firebase Auth account ──────────────────────────────
+      console.log('[DeleteAccount] Deleting Firebase Auth account');
       await deleteUser(auth.currentUser!);
+      console.log('[DeleteAccount] Firebase Auth account deleted');
 
       push('/login');
     } catch (err: any) {
-      if (err.code === 'auth/wrong-password') setDeleteError('Wrong password.');
-      else if (err.code === 'auth/requires-recent-login') setDeleteError('Please log out and log back in, then try again.');
-      else setDeleteError('Something went wrong. Please try again.');
-      console.error('[DeleteAccount]', err);
+      console.error('[DeleteAccount] Fatal error:', err);
+      console.error('[DeleteAccount] Error code:', err.code);
+      console.error('[DeleteAccount] Error message:', err.message);
+      
+      if (err.code === 'auth/wrong-password') {
+        setDeleteError('Wrong password.');
+      } else if (err.code === 'auth/requires-recent-login') {
+        setDeleteError('Please log out and log back in, then try again.');
+      } else if (err.code === 'auth/user-not-found') {
+        setDeleteError('User not found. You may have been logged out.');
+      } else if (err.code === 'auth/too-many-requests') {
+        setDeleteError('Too many requests. Please wait a moment and try again.');
+      } else {
+        setDeleteError(`Error: ${err.message || 'Something went wrong. Please try again.'}`);
+      }
     }
     setDeleteLoading(false);
   };
