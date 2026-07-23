@@ -1,9 +1,9 @@
 import Redis from 'ioredis';
 
 // ── Redis client singleton ─────────────────────────────────────────────────────
-let redisClient: Redis | null = null;
+let redisClient: Redis | any = null;
 
-export function getRedisClient(): Redis {
+export function getRedisClient(): Redis | any {
   if (!redisClient) {
     const redisUrl = process.env.REDIS_URL || process.env.UPSTASH_REDIS_REST_URL;
     
